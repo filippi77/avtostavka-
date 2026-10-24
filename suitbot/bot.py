@@ -10,6 +10,7 @@ from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
     CallbackQuery,
+    ErrorEvent,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     LabeledPrice,
@@ -427,6 +428,21 @@ async def main() -> None:
     bot = Bot(cfg.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     subs = SubscriptionChecker(cfg)
+
+    @dp.errors()
+    async def on_error(event: ErrorEvent, bot: Bot) -> None:
+        # Любой сбой обработчика пишем в лог, а админу — ещё и в личку, чтобы не гадать, почему бот молчит.
+        log.error("handler failed", exc_info=event.exception)
+        update = event.update
+        user = (update.message and update.message.from_user) or (
+            update.callback_query and update.callback_query.from_user
+        )
+        if user and user.id in cfg.admins:
+            error = f"{type(event.exception).__name__}: {event.exception}"
+            try:
+                await bot.send_message(user.id, f"⚠️ Ошибка в боте:\n<code>{escape(error[:800])}</code>")
+            except Exception:
+                log.exception("failed to report error to admin")
     dp.include_router(admin.build_router(cfg, db))
     dp.include_router(cards.build_router(
         cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
