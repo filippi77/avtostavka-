@@ -1,0 +1,293 @@
+<title>Бот прогнозов на масти</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: подписанные шаги слева, макет чата Telegram справа; на телефоне — одной колонкой */
+:root {
+  --bg: #eef2ec;
+  --surface: #ffffff;
+  --chat: #cfdcc0;
+  --fg: #1d2620;
+  --muted: #5d6b60;
+  --line: #d6ddd2;
+  --accent: #2f7d4f;
+  --bubble-in: #ffffff;
+  --bubble-bot: #f3f8ef;
+  --name-user: #c2412d;
+  --name-bot: #2f7d4f;
+  --win: #1f8a4c;
+  --lose: #c0392b;
+  --red-suit: #d0332b;
+  --black-suit: #1d2620;
+  --star: #e6a100;
+  --tag-bg: #e3ece0;
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121714; --surface: #1a211c; --chat: #1f2b22; --fg: #e4ebe3; --muted: #93a297;
+    --line: #2c3730; --accent: #5cc187; --bubble-in: #232d26; --bubble-bot: #1c2a21;
+    --name-user: #f08a74; --name-bot: #6fd39a; --win: #5cd18c; --lose: #ff7b6b;
+    --red-suit: #ff6b61; --black-suit: #e4ebe3; --star: #ffc53d; --tag-bg: #26332a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121714; --surface: #1a211c; --chat: #1f2b22; --fg: #e4ebe3; --muted: #93a297;
+  --line: #2c3730; --accent: #5cc187; --bubble-in: #232d26; --bubble-bot: #1c2a21;
+  --name-user: #f08a74; --name-bot: #6fd39a; --win: #5cd18c; --lose: #ff7b6b;
+  --red-suit: #ff6b61; --black-suit: #e4ebe3; --star: #ffc53d; --tag-bg: #26332a;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 56px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 4.5vw, 38px); line-height: 1.15; }
+h2 { font-size: 20px; }
+.lead { color: var(--muted); max-width: 62ch; margin: 12px 0 0; font-size: 16px; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); font-weight: 600; margin-bottom: 10px; }
+.r { color: var(--red-suit); } .k { color: var(--black-suit); }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+
+/* Разбор поста */
+.post-anatomy { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; display: grid; gap: 18px; }
+.post-line { font-family: var(--font-mono); font-size: clamp(14px, 2.6vw, 19px); overflow-x: auto; white-space: nowrap; padding-bottom: 4px; }
+.post-line span { padding: 2px 4px; border-radius: 6px; }
+.seg-num { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.seg-player { background: color-mix(in srgb, var(--star) 22%, transparent); }
+.seg-banker { background: color-mix(in srgb, var(--muted) 18%, transparent); }
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.legend div { display: grid; gap: 2px; min-width: 0; }
+.legend b { font-weight: 600; }
+.legend small { color: var(--muted); font-size: 13.5px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: 1px; }
+
+/* Сценарий */
+.scenario { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 32px; align-items: start; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; counter-reset: step; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.steps li:first-child { border-top: 0; }
+.steps li::before { content: counter(step); font-family: var(--font-display); font-size: 14px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--tag-bg); color: var(--accent); }
+.steps b { display: block; margin-bottom: 2px; }
+.steps p { margin: 0; color: var(--muted); font-size: 14px; }
+
+.phone { background: var(--chat); border-radius: 22px; border: 1px solid var(--line); overflow: hidden; }
+.phone-head { background: var(--surface); padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+.avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; color: #fff; font-size: 14px; flex-shrink: 0; }
+.av-chat { background: linear-gradient(135deg, #b8322a, #e0a32c); }
+.av-chan { background: #2b5f9e; }
+.av-user { background: #3a3f3b; }
+.av-bot { background: var(--accent); }
+.phone-head strong { display: block; font-size: 15px; }
+.phone-head small { color: var(--muted); font-size: 12.5px; }
+.feed { padding: 14px 12px 18px; display: grid; gap: 10px; }
+.msg { display: flex; gap: 8px; align-items: flex-end; max-width: 100%; }
+.msg .avatar { width: 30px; height: 30px; font-size: 12px; }
+.bubble { background: var(--bubble-in); border-radius: 14px 14px 14px 4px; padding: 7px 11px 6px; min-width: 0; max-width: 88%; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+.bubble.bot { background: var(--bubble-bot); }
+.who { font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; gap: 12px; }
+.who em { font-style: normal; font-weight: 400; color: var(--muted); font-size: 12px; }
+.who.user { color: var(--name-user); } .who.bot { color: var(--name-bot); } .who.chan { color: #2b5f9e; }
+:root[data-theme="dark"] .who.chan { color: #7fb0ec; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .who.chan { color: #7fb0ec; } }
+.text { font-size: 14.5px; overflow-wrap: anywhere; }
+.text .cmd { color: var(--accent); font-family: var(--font-mono); font-size: 13.5px; }
+.time { font-size: 11px; color: var(--muted); text-align: right; margin-top: 1px; font-variant-numeric: tabular-nums; }
+.marker { justify-self: center; font-size: 12px; background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); padding: 3px 10px; border-radius: 999px; font-weight: 500; }
+.win { color: var(--win); font-weight: 600; } .lose { color: var(--lose); font-weight: 600; }
+.result-table { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 10px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.result-table span:nth-child(3n) { text-align: right; }
+
+/* Stars */
+.stars { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 32px; align-items: start; }
+.kb { display: grid; gap: 6px; margin-top: 8px; }
+.kb span { display: block; text-align: center; background: color-mix(in srgb, var(--accent) 12%, var(--bubble-in)); color: var(--accent); border-radius: 8px; padding: 7px; font-size: 13.5px; font-weight: 500; }
+.invoice { border-left: 3px solid var(--star); padding-left: 10px; margin-top: 4px; }
+.invoice b { display: block; }
+.pay-btn { margin-top: 8px; display: block; text-align: center; background: var(--star); color: #1d1600; border-radius: 8px; padding: 7px; font-weight: 600; font-size: 13.5px; }
+.note { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: grid; gap: 10px; }
+.note p { margin: 0; color: var(--muted); }
+.note p strong { color: var(--fg); }
+
+/* Коэффициенты */
+.odds { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.odd { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 4px; }
+.odd .v { font-family: var(--font-display); font-size: 24px; font-variant-numeric: tabular-nums; }
+.odd small { color: var(--muted); font-size: 13px; }
+.odd code { color: var(--accent); }
+
+@media (max-width: 820px) {
+  .scenario, .stars { grid-template-columns: minmax(0, 1fr); }
+  .stars .phone { order: 2; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Baccara Chat · игровой бот</div>
+    <h1>Как бот принимает прогнозы на масти</h1>
+    <p class="lead">Игроки ставят фишки на следующие раздачи прямо в чате. Бот читает посты канала Statistika Bakkara и сам рассчитывает ставки, когда игра закончилась. Ниже настоящие ответы бота из тестового прогона.</p>
+  </header>
+
+  <section class="post-anatomy" aria-labelledby="anat">
+    <h2 id="anat">Что бот видит в посте канала</h2>
+    <div class="post-line"><span class="seg-num">#N207.</span> <span class="seg-player">7(J<b class="r">♦</b> 7<b class="k">♣</b>)</span> - <span class="seg-banker">✅9(2<b class="r">♦</b> 7<b class="r">♥</b>)</span> #T16 🔵 #R</div>
+    <div class="legend">
+      <div><b><i class="swatch seg-num"></i>Номер игры</b><small>На него игроки ставят: <code>/bet 208 …</code></small></div>
+      <div><b><i class="swatch seg-player"></i>Карты игрока</b><small>Ставка на масть играет, если масть есть здесь. В игре 207 сыграли бы ♦ и ♣.</small></div>
+      <div><b><i class="swatch seg-banker"></i>Карты банкира</b><small>Очки 9 против 7, значит победил банкир. Масти банкира на ставку не влияют.</small></div>
+    </div>
+  </section>
+
+  <section class="scenario" aria-labelledby="flow">
+    <div>
+      <div class="eyebrow">Сценарий</div>
+      <h2 id="flow">Одна игра от ставки до выплаты</h2>
+      <ol class="steps">
+        <li><div><b>Канал публикует игру №207</b><p>Бот запоминает последнюю игру. До первого поста ставки не принимаются.</p></div></li>
+        <li><div><b>Руслан ставит на игру №208</b><p>Черва у игрока ×1.9 и победа игрока ×1.95. Фишки сразу списываются: 500 → 350.</p></div></li>
+        <li><div><b>Ставка больше баланса отклоняется</b><p>1000 фишек на буби не проходит, на балансе 350.</p></div></li>
+        <li><div><b>Игра №208 началась</b><p>Появился пост с ⏰. Ставки на 208 закрыты, принимаются на 209–228.</p></div></li>
+        <li><div><b>Канал дописал итог, бот платит</b><p>У игрока 10♠ 5♥ A♣, есть черва, игрок выиграл 6:3. Обе ставки сыграли: +95 и +195. Повторное редактирование поста второй раз не платит.</p></div></li>
+        <li><div><b>Баланс</b><p>350 + 95 + 195 = 640 фишек.</p></div></li>
+      </ol>
+    </div>
+
+    <div class="phone" role="img" aria-label="Макет переписки в Baccara Chat">
+      <div class="phone-head">
+        <div class="avatar av-chat">BC</div>
+        <div><strong>Baccara Chat</strong><small>Руслан, Statistika Bakkara, бот</small></div>
+      </div>
+      <div class="feed">
+        <span class="marker">1 · пост канала</span>
+        <div class="msg"><div class="avatar av-chan">SB</div><div class="bubble">
+          <div class="who chan">Statistika Bakkara <em>канал</em></div>
+          <div class="text">#N207. 7(J<span class="r">♦</span> 7<span class="k">♣</span>) - ✅9(2<span class="r">♦</span> 7<span class="r">♥</span>) #T16 🔵 #R</div>
+          <div class="time">05:26</div></div></div>
+
+        <span class="marker">2 · ставки</span>
+        <div class="msg"><div class="avatar av-user">Р</div><div class="bubble">
+          <div class="who user">Руслан</div>
+          <div class="text"><span class="cmd">/bet 208 ♥ 50</span></div>
+          <div class="time">05:26</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="who bot">Бот прогнозов <em>бот</em></div>
+          <div class="text">✅ Ставка принята: #N208 · <span class="r">♥</span> · 50 ×1.9 (выигрыш 95)</div>
+          <div class="time">05:26</div></div></div>
+        <div class="msg"><div class="avatar av-user">Р</div><div class="bubble">
+          <div class="who user">Руслан</div>
+          <div class="text"><span class="cmd">/bet 208 игрок 100</span></div>
+          <div class="time">05:26</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="who bot">Бот прогнозов <em>бот</em></div>
+          <div class="text">✅ Ставка принята: #N208 · игрок · 100 ×1.95 (выигрыш 195)</div>
+          <div class="time">05:26</div></div></div>
+
+        <span class="marker">3 · не хватает фишек</span>
+        <div class="msg"><div class="avatar av-user">Р</div><div class="bubble">
+          <div class="who user">Руслан</div>
+          <div class="text"><span class="cmd">/bet 208 буби 1000</span></div>
+          <div class="time">05:26</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="who bot">Бот прогнозов <em>бот</em></div>
+          <div class="text">Недостаточно фишек: на балансе 350. /bonus или /buy</div>
+          <div class="time">05:26</div></div></div>
+
+        <span class="marker">4 · игра пошла</span>
+        <div class="msg"><div class="avatar av-chan">SB</div><div class="bubble">
+          <div class="who chan">Statistika Bakkara <em>канал</em></div>
+          <div class="text">⏰#N208. ▶ 5(10<span class="k">♠</span> 5<span class="r">♥</span>) - 3(A<span class="k">♣</span> 2<span class="r">♦</span>)</div>
+          <div class="time">05:27</div></div></div>
+        <div class="msg"><div class="avatar av-user">Р</div><div class="bubble">
+          <div class="who user">Руслан</div>
+          <div class="text"><span class="cmd">/bet 208 ♠ 10</span></div>
+          <div class="time">05:27</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="who bot">Бот прогнозов <em>бот</em></div>
+          <div class="text">Последняя игра #N208. Ставки принимаются на #N209…#N228.</div>
+          <div class="time">05:27</div></div></div>
+
+        <span class="marker">5 · итог и выплата</span>
+        <div class="msg"><div class="avatar av-chan">SB</div><div class="bubble">
+          <div class="who chan">Statistika Bakkara <em>канал · изменено</em></div>
+          <div class="text">#N208. ✅6(10<span class="k">♠</span> 5<span class="r">♥</span> A<span class="k">♣</span>) - 3(A<span class="k">♣</span> 2<span class="r">♦</span>)</div>
+          <div class="time">05:28</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="who bot">Бот прогнозов <em>бот</em></div>
+          <div class="text">🎴 <b>#N208</b>: игрок 6 (10<span class="k">♠</span> 5<span class="r">♥</span> A<span class="k">♣</span>) — банкир 3 (A<span class="k">♣</span> 2<span class="r">♦</span>)
+            <div class="result-table">
+              <span>Руслан:</span><span class="r">♥</span><span class="win">✅ +95</span>
+              <span>Руслан:</span><span>игрок</span><span class="win">✅ +195</span>
+            </div></div>
+          <div class="time">05:28</div></div></div>
+
+        <span class="marker">6 · баланс</span>
+        <div class="msg"><div class="avatar av-user">Р</div><div class="bubble">
+          <div class="who user">Руслан</div>
+          <div class="text"><span class="cmd">/balance</span></div>
+          <div class="time">05:28</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="who bot">Бот прогнозов <em>бот</em></div>
+          <div class="text">💰 Руслан: <b>640</b> фишек</div>
+          <div class="time">05:28</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="odds">
+    <div class="eyebrow">Коэффициенты по умолчанию</div>
+    <h2 id="odds" style="margin-bottom:14px">На что можно ставить</h2>
+    <div class="odds">
+      <div class="odd"><small>Масть у игрока</small><span class="v">×1.9</span><small><code>/bet 208 ♥ 50</code></small></div>
+      <div class="odd"><small>Победа игрока</small><span class="v">×1.95</span><small><code>/bet 208 игрок 50</code></small></div>
+      <div class="odd"><small>Победа банкира</small><span class="v">×1.95</span><small><code>/bet 208 банкир 50</code></small></div>
+      <div class="odd"><small>Ничья</small><span class="v">×8</span><small><code>/bet 208 ничья 50</code></small></div>
+    </div>
+  </section>
+
+  <section class="stars" aria-labelledby="buy">
+    <div class="phone" role="img" aria-label="Макет покупки фишек за Stars в личке с ботом">
+      <div class="phone-head">
+        <div class="avatar av-bot">🎴</div>
+        <div><strong>Бот прогнозов</strong><small>личные сообщения</small></div>
+      </div>
+      <div class="feed">
+        <div class="msg"><div class="avatar av-user">Р</div><div class="bubble">
+          <div class="text"><span class="cmd">/buy</span></div>
+          <div class="time">05:30</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="text">Выберите пакет фишек:</div>
+          <div class="kb">
+            <span>⭐ 50 → 500 фишек</span>
+            <span>⭐ 100 → 1000 фишек</span>
+            <span>⭐ 250 → 2500 фишек</span>
+            <span>⭐ 500 → 5000 фишек</span>
+          </div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="invoice"><b>500 фишек</b><span class="text">500 игровых фишек для прогнозов. Фишки не выводятся и не обмениваются на Stars.</span></div>
+          <span class="pay-btn">Оплатить ⭐ 50</span></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="text">⭐ Оплата получена: +500 фишек. Баланс: 1140</div>
+          <div class="time">05:31</div></div></div>
+      </div>
+    </div>
+    <div class="note">
+      <div class="eyebrow" style="margin:0">Игровая валюта</div>
+      <h2 id="buy">Фишки покупаются за Telegram Stars</h2>
+      <p><strong>Курс:</strong> 1 ⭐ = 10 фишек, меняется в настройках.</p>
+      <p><strong>Бесплатно:</strong> 500 фишек на старте и <code>/bonus</code> на 100 фишек раз в сутки.</p>
+      <p><strong>Вывода нет.</strong> Telegram не даёт ботам выплачивать Stars игрокам, поэтому фишки только для игры и таблицы лидеров <code>/top</code>.</p>
+      <p><strong>Покупка только в личке.</strong> В группе бот ответит ссылкой на себя.</p>
+    </div>
+  </section>
+</div>
