@@ -59,3 +59,9 @@ def test_bet_wins():
 def test_result_sources_accept_username():
     from suitbot.config import _chats
     assert _chats("@Statistika_Baccara, -100123") == {"statistika_baccara", -100123}
+
+
+def test_hourglass_post_from_channel():
+    r = parse_game("⏳ #N272. ▶️ 2(7♣️ 5♥️) - 2(6♠️ 6♦️)")
+    assert r.number == 272 and not r.finished
+    assert r.player_cards == (("7", "♣"), ("5", "♥"))
