@@ -40,6 +40,10 @@ async def place(
         raise BetError(f"Последняя игра #N{last}. Ставки принимаются на #N{last + 1}…#N{last + cfg.max_games_ahead}.")
     if await db.game_seen_since(game, int(time.time()) - cfg.bet_ttl_hours * 3600):
         raise BetError(f"Игра #N{game} уже началась, ставки закрыты.")
+    if cfg.bet_window_seconds and ahead == 1:
+        seen = await db.game_seen_at(last)
+        if seen and time.time() > seen + cfg.bet_window_seconds:
+            raise BetError(f"Приём ставок на #N{game} закрыт — ставьте на следующую игру.")
 
     if tournament_id is not None:
         await db.join_tournament(tournament_id, user_id, cfg.tournament_start_chips)

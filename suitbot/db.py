@@ -133,8 +133,17 @@ class DB:
         await self.conn.commit()
 
     async def top(self, limit: int = 10) -> list[aiosqlite.Row]:
-        cur = await self.conn.execute("SELECT name, balance FROM users ORDER BY balance DESC LIMIT ?", (limit,))
+        cur = await self.conn.execute(
+            "SELECT id, name, balance FROM users ORDER BY balance DESC, id LIMIT ?", (limit,)
+        )
         return await cur.fetchall()
+
+    async def user_rank(self, user_id: int) -> int:
+        cur = await self.conn.execute(
+            "SELECT COUNT(*) + 1 AS n FROM users WHERE balance > (SELECT balance FROM users WHERE id = ?)",
+            (user_id,),
+        )
+        return (await cur.fetchone())["n"]
 
     # --- ставки -------------------------------------------------------------
 
@@ -243,6 +252,11 @@ class DB:
             "SELECT 1 FROM games WHERE number = ? AND seen_at >= ?", (number, since)
         )
         return await cur.fetchone() is not None
+
+    async def game_seen_at(self, number: int) -> int | None:
+        cur = await self.conn.execute("SELECT seen_at FROM games WHERE number = ?", (number,))
+        row = await cur.fetchone()
+        return row["seen_at"] if row else None
 
     async def last_game(self) -> int | None:
         value = await self.get_state("last_game")

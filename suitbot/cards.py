@@ -1,18 +1,22 @@
 """Карточки игр: сообщение в чате с кнопками ставок на будущую игру.
 
-Когда канал публикует итог игры N, бот выкладывает карточку на игру N+CARD_LEAD,
-если её номер делится на выбранную в /admin частоту (каждая, раз в 5, раз в 10).
-Сумму ставки и кошелёк игрок выбирает кнопками один раз — бот запоминает выбор.
-Как только по игре появился пост канала, кнопки с карточки убираются.
+Как только в канале появился пост игры N (неважно, идёт она или уже закончилась),
+бот сразу выкладывает карточку на игру N+1 — если её номер делится на выбранную
+в /admin частоту (каждая, раз в 5, раз в 10). Ставить можно, пока идёт игра N.
+Как только появился пост игры N+1, кнопки с карточки убираются, поэтому
+поставить во время самой игры нельзя. Сумму ставки и кошелёк игрок выбирает
+кнопками один раз — бот запоминает выбор.
 """
 
+import asyncio
 import logging
 import time
 
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from . import betting
+from . import betting, rating
+from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
 
@@ -20,6 +24,7 @@ log = logging.getLogger(__name__)
 
 STAKES = (10, 50, 100, 500)
 CARD_FREQUENCIES = (1, 5, 10, 0)  # варианты в панели; 0 — выключено
+RATING_COOLDOWN = 5  # секунд между нажатиями «Рейтинг» одним игроком
 
 
 async def card_every(cfg: Config, db: DB) -> int:
@@ -60,8 +65,10 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None) -> I
             InlineKeyboardButton(text="🏆 Турнир", callback_data="w:tour"),
             InlineKeyboardButton(text="Обычные фишки", callback_data="w:main"),
         ])
+    last_row = [InlineKeyboardButton(text="📊 Рейтинг", callback_data="rate")]
     if bot_username:
-        rows.append([InlineKeyboardButton(text="ℹ️ Как играть", url=f"https://t.me/{bot_username}?start=help")])
+        last_row.append(InlineKeyboardButton(text="👤 Мой кабинет", url=f"https://t.me/{bot_username}?start=menu"))
+    rows.append(last_row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -73,9 +80,10 @@ async def _tournament_on(cfg: Config, db: DB) -> bool:
     return cfg.tournament_enabled and await db.active_tournament() is not None
 
 
-async def maybe_post(cfg: Config, db: DB, bot: Bot, finished_game: int, chat_id: int) -> None:
+async def maybe_post(cfg: Config, db: DB, bot: Bot, seen_game: int, chat_id: int) -> None:
+    """Вызывается при первом посте игры seen_game — карточка на следующую игру."""
     every = await card_every(cfg, db)
-    game = finished_game + cfg.card_lead
+    game = seen_game + 1
     if not every or game % every or await db.get_card(game, chat_id, _since(cfg)):
         return
     on = await _tournament_on(cfg, db)
@@ -107,8 +115,33 @@ async def close_for_game(cfg: Config, db: DB, bot: Bot, game: int) -> None:
         await refresh(cfg, db, bot, game, card["chat_id"], closed=True)
 
 
-def build_router(cfg: Config, db: DB, ensure_user) -> Router:
+async def window_loop(cfg: Config, db: DB, bot: Bot) -> None:
+    """Закрывает карточку по таймеру BET_WINDOW_SECONDS, не дожидаясь поста игры."""
+    while cfg.bet_window_seconds:
+        try:
+            last = await db.last_game()
+            seen = await db.game_seen_at(last) if last is not None else None
+            if seen and time.time() > seen + cfg.bet_window_seconds:
+                await close_for_game(cfg, db, bot, last + 1)
+        except Exception:
+            log.exception("card window loop failed")
+        await asyncio.sleep(2)
+
+
+def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) -> Router:
     router = Router()
+    rating_pressed: dict[int, float] = {}
+
+    @router.callback_query(F.data == "rate")
+    async def on_rating(query: CallbackQuery) -> None:
+        # Рейтинг показывается всплывающим окном только нажавшему — в чат ничего не пишется.
+        now = time.time()
+        if now - rating_pressed.get(query.from_user.id, 0) < RATING_COOLDOWN:
+            await query.answer()
+            return
+        rating_pressed[query.from_user.id] = now
+        await ensure_user(query.from_user)
+        await query.answer(await rating.popup_text(cfg, db, query.from_user.id), show_alert=True)
 
     @router.callback_query(F.data.startswith("st:"))
     async def on_stake(query: CallbackQuery) -> None:
@@ -128,6 +161,9 @@ def build_router(cfg: Config, db: DB, ensure_user) -> Router:
     async def on_bet(query: CallbackQuery, bot: Bot) -> None:
         _, game, kind, pick = query.data.split(":", 3)
         user = await ensure_user(query.from_user)
+        if not await subs.is_subscribed(bot, user["id"]):
+            await query.answer(subs.alert(), show_alert=True)
+            return
         tournament_bet = user["pref_wallet"] == "tour" and await _tournament_on(cfg, db)
         chat_id = query.message.chat.id if query.message else query.from_user.id
         try:

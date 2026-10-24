@@ -17,7 +17,9 @@ class Config:
 
     chips_per_star: int = int(os.getenv("CHIPS_PER_STAR", "10"))
     start_balance: int = int(os.getenv("START_BALANCE", "500"))
-    daily_bonus: int = int(os.getenv("DAILY_BONUS", "100"))
+    # Бонус: сколько фишек и как часто (в днях) можно забирать.
+    bonus_amount: int = int(os.getenv("BONUS_AMOUNT", "300"))
+    bonus_period_days: int = int(os.getenv("BONUS_PERIOD_DAYS", "7"))
     min_bet: int = int(os.getenv("MIN_BET", "10"))
     max_bet: int = int(os.getenv("MAX_BET", "10000"))
 
@@ -27,6 +29,15 @@ class Config:
     game_number_wrap: int = int(os.getenv("GAME_NUMBER_WRAP", "1440"))
     # Ставки, которые так и не дождались результата, возвращаются.
     bet_ttl_hours: int = int(os.getenv("BET_TTL_HOURS", "6"))
+    # Страховка на случай, если канал публикует пост игры только после её конца:
+    # ставки на следующую игру закрываются через столько секунд после поста
+    # предыдущей. 0 — закрывать только по посту самой игры.
+    bet_window_seconds: int = int(os.getenv("BET_WINDOW_SECONDS", "0"))
+
+    # Подписка на канал, без которой нельзя ставить, брать бонус и вступать в турнир.
+    # Бот должен быть админом этого канала, иначе Telegram не покажет ему подписчиков.
+    required_channel: str = os.getenv("REQUIRED_CHANNEL", "")  # @username или -100…
+    required_channel_url: str = os.getenv("REQUIRED_CHANNEL_URL", "")
 
     # Коэффициенты выплат (ставка × коэффициент при выигрыше).
     payout_suit: float = float(os.getenv("PAYOUT_SUIT", "1.9"))
@@ -35,9 +46,8 @@ class Config:
     payout_tie: float = float(os.getenv("PAYOUT_TIE", "8"))
 
     # Карточки игр с кнопками: как часто публиковать (каждую N-ю игру, 0 — выключено;
-    # меняется из /admin) и за сколько игр вперёд открывать ставки.
-    card_every: int = int(os.getenv("CARD_EVERY", "5"))
-    card_lead: int = int(os.getenv("CARD_LEAD", "2"))
+    # меняется из /admin). Карточка на игру N+1 выходит сразу, как появился пост игры N.
+    card_every: int = int(os.getenv("CARD_EVERY", "1"))
 
     # Турнир: всем поровну бесплатных фишек, призы раздаёт владелец.
     # Запускается из /admin; TOURNAMENT_AUTO=1 — ещё и автоматически каждый понедельник.

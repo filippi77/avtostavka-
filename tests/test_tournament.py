@@ -160,10 +160,10 @@ def test_card_frequency_and_closing(tmp_path):
     async def body(db):
         bot = FakeBot()
         await db.set_state("card_every", "5")
-        await cards.maybe_post(CFG, db, bot, 207, -100)  # 207+2=209 — не кратно 5
+        await cards.maybe_post(CFG, db, bot, 208, -100)  # карточка на 209 — не кратно 5
         assert bot.sent == []
-        await cards.maybe_post(CFG, db, bot, 208, -100)  # 210 — кратно 5
-        await cards.maybe_post(CFG, db, bot, 208, -100)  # повтор не дублирует
+        await cards.maybe_post(CFG, db, bot, 209, -100)  # на 210 — кратно 5
+        await cards.maybe_post(CFG, db, bot, 209, -100)  # повтор не дублирует
         assert len(bot.sent) == 1 and "Игра #N210" in bot.sent[0][1]
 
         await db.set_state("card_every", "0")
@@ -197,3 +197,63 @@ def test_betting_place_validation(tmp_path):
             await betting.place(CFG, db, 1, -100, 209, "side", "P", 600, tournament_bet=True)
 
     run_with_db(tmp_path, body)
+
+
+def test_bet_window_closes_next_game(tmp_path):
+    async def body(db):
+        cfg = replace(CFG, bet_window_seconds=30)
+        await db.ensure_user(1, "Руслан", 500)
+        await db.mark_game_seen(207, fresh_after=0)
+        await betting.place(cfg, db, 1, -100, 208, "suit", "♥", 50, tournament_bet=False)
+        await db.conn.execute("UPDATE games SET seen_at = seen_at - 31 WHERE number = 207")
+        with pytest.raises(betting.BetError, match="закрыт"):
+            await betting.place(cfg, db, 1, -100, 208, "suit", "♥", 50, tournament_bet=False)
+        # на игры дальше окно не влияет
+        await betting.place(cfg, db, 1, -100, 209, "suit", "♥", 50, tournament_bet=False)
+
+    run_with_db(tmp_path, body)
+
+
+def test_rating_popup_fits_and_shows_own_place(tmp_path):
+    from suitbot import rating
+
+    async def body(db):
+        for uid in range(1, 16):
+            await db.ensure_user(uid, f"Игрок с длинным именем {uid}", 100 * uid)
+        text = await rating.popup_text(CFG, db, 3)
+        assert len(text) <= rating.POPUP_LIMIT
+        assert text.startswith("📊 Рейтинг") and "1. Игрок с дли… 1500" in text
+        assert text.endswith("Вы: 13 место · 300")
+
+        tid = await db.create_tournament(int(time.time()), int(time.time()) + 3600)
+        await db.join_tournament(tid, 5, 1000)
+        assert "Вы не в турнире" in await rating.popup_text(CFG, db, 3)
+        assert "Вы: 1 место · 1000" in await rating.popup_text(CFG, db, 5)
+
+    run_with_db(tmp_path, body)
+
+
+def test_subscription_checker():
+    from suitbot.access import SubscriptionChecker
+
+    class Bot:
+        def __init__(self, status):
+            self.status, self.calls = status, 0
+
+        async def get_chat_member(self, chat_id, user_id):
+            self.calls += 1
+            if self.status == "error":
+                raise RuntimeError("bot is not admin")
+            return SimpleNamespace(status=self.status)
+
+    async def go():
+        assert await SubscriptionChecker(CFG).is_subscribed(Bot("left"), 1)  # проверка выключена
+        subs = SubscriptionChecker(replace(CFG, required_channel="@stat_bakkara"))
+        assert not await subs.is_subscribed(Bot("left"), 1)
+        bot = Bot("member")
+        assert await subs.is_subscribed(bot, 1) and await subs.is_subscribed(bot, 1)
+        assert bot.calls == 1  # подписка закеширована
+        assert await subs.is_subscribed(Bot("error"), 2)  # бот не админ канала — не блокируем
+        assert subs.channel_url == "https://t.me/stat_bakkara"
+
+    asyncio.run(go())
