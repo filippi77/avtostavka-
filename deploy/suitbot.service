@@ -1,0 +1,19 @@
+# Служба systemd: бот работает постоянно и перезапускается после сбоя/перезагрузки.
+# Установка (из папки с ботом, например /opt/suitbot):
+#   sudo cp deploy/suitbot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now suitbot
+# Логи: journalctl -u suitbot -f
+[Unit]
+Description=Suit prediction Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/suitbot
+EnvironmentFile=/opt/suitbot/.env
+ExecStart=/opt/suitbot/.venv/bin/python -m suitbot.bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

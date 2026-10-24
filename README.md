@@ -109,6 +109,18 @@ set -a; . ./.env; set +a
 
 Тесты: `.venv/bin/pip install pytest && .venv/bin/python -m pytest`
 
+### На сервере (Linux, постоянно)
+
+```bash
+sudo mkdir -p /opt/suitbot && cd /opt/suitbot   # распакуйте сюда архив
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+sudo cp deploy/suitbot.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now suitbot
+journalctl -u suitbot -f   # логи
+```
+
+База данных — файл `suitbot.sqlite3` в папке бота: его стоит иногда копировать в бэкап.
+
 ## Настройки
 
 Все настройки задаются через переменные окружения, см. `.env.example`.
