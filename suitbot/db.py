@@ -311,6 +311,16 @@ class DB:
 
     # --- платежи ------------------------------------------------------------
 
+    async def sales_summary(self, since: int = 0) -> tuple[int, int, int]:
+        """(покупок, звёзд, покупателей) с момента since."""
+        cur = await self.conn.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(stars), 0) AS stars, COUNT(DISTINCT user_id) AS buyers "
+            "FROM payments WHERE created_at >= ?",
+            (since,),
+        )
+        row = await cur.fetchone()
+        return row["n"], row["stars"], row["buyers"]
+
     async def record_payment(self, charge_id: str, user_id: int, stars: int, chips: int) -> bool:
         """Зачисляет фишки за оплату. Повторное событие с тем же charge_id игнорируется."""
         cur = await self.conn.execute(

@@ -87,3 +87,17 @@ def test_refund_stale(tmp_path):
         await db.close()
 
     run(go())
+
+
+def test_sales_summary(tmp_path):
+    async def go():
+        db = await fresh_db(tmp_path)
+        await db.ensure_user(2, "Алсу", 100)
+        await db.record_payment("c1", 1, 5, 5000)
+        await db.record_payment("c2", 1, 1, 1000)
+        await db.record_payment("c3", 2, 10, 10000)
+        assert await db.sales_summary() == (3, 16, 2)
+        assert await db.sales_summary(int(time.time()) + 10) == (0, 0, 0)
+        await db.close()
+
+    run(go())

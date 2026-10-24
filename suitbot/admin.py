@@ -73,6 +73,19 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         ])
     lines.append(f"Призы: {' / '.join(escape(p) for p in cfg.tournament_prizes)}")
 
+    try:
+        balance = f"{(await bot.get_my_star_balance()).amount} ⭐"
+    except Exception:
+        balance = "не удалось получить"
+    n, stars, buyers = await db.sales_summary()
+    day_n, day_stars, _ = await db.sales_summary(int(time.time()) - 86400)
+    lines += [
+        "",
+        f"⭐ Баланс звёзд бота: {balance}",
+        f"Продажи всего: {stars} ⭐ · {n} покупок · {buyers} покупателей",
+        f"За сутки: {day_stars} ⭐ · {day_n} покупок",
+    ]
+
     rows.append([
         InlineKeyboardButton(
             text=("✅ " if every == f else "") + {0: "Выкл", 1: "Каждая"}.get(f, f"Раз в {f}"),
