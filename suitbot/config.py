@@ -6,13 +6,19 @@ def _ids(raw: str) -> set[int]:
     return {int(x) for x in raw.replace(" ", "").split(",") if x}
 
 
+def _chats(raw: str) -> set[int | str]:
+    """Список чатов через запятую: числовые id или @username (хранится без @, в нижнем регистре)."""
+    items = (x for x in raw.replace(" ", "").split(",") if x)
+    return {int(x) if x.lstrip("-").isdigit() else x.lstrip("@").lower() for x in items}
+
+
 @dataclass(frozen=True)
 class Config:
     token: str = field(default_factory=lambda: os.environ["BOT_TOKEN"])
     db_path: str = os.getenv("DB_PATH", "suitbot.sqlite3")
-    # Каналы/чаты, из которых принимаются результаты. Пусто — любой источник
-    # с постами формата "#N123. ...". Лучше указать id канала статистики.
-    result_sources: set[int] = field(default_factory=lambda: _ids(os.getenv("RESULT_SOURCES", "")))
+    # Каналы, из которых принимаются результаты: id или @username. Пусто — любой
+    # источник с постами формата "#N123. ...". Лучше указать канал статистики.
+    result_sources: set[int | str] = field(default_factory=lambda: _chats(os.getenv("RESULT_SOURCES", "")))
     admins: set[int] = field(default_factory=lambda: _ids(os.getenv("ADMINS", "")))
 
     chips_per_star: int = int(os.getenv("CHIPS_PER_STAR", "10"))

@@ -260,7 +260,9 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         if not cfg.result_sources:
             return True
         source = message.sender_chat or message.chat
-        return source is not None and source.id in cfg.result_sources
+        if source is None:
+            return False
+        return source.id in cfg.result_sources or (source.username or "").lower() in cfg.result_sources
 
     async def handle_result_post(message: Message, bot: Bot) -> None:
         text = message.text or message.caption

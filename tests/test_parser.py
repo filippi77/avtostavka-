@@ -54,3 +54,8 @@ def test_bet_wins():
     assert not bet_wins("suit", "♥", r)  # черва только у банкира
     assert bet_wins("side", "B", r)
     assert not bet_wins("side", "P", r)
+
+
+def test_result_sources_accept_username():
+    from suitbot.config import _chats
+    assert _chats("@Statistika_Baccara, -100123") == {"statistika_baccara", -100123}
