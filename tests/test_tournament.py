@@ -284,3 +284,13 @@ def test_group_with_channel_posts_becomes_main_chat(tmp_path):
         assert bot.sent[0][0] == -100777 and "Игра #N273" in bot.sent[0][1]
 
     run_with_db(tmp_path, body)
+
+
+def test_format_ends_without_tz_database(monkeypatch):
+    def missing(name):
+        raise KeyError(name)  # как ZoneInfoNotFoundError на сервере без tzdata
+
+    monkeypatch.setattr(tour, "ZoneInfo", missing)
+    tz = ZoneInfo("Europe/Moscow")
+    ts = int(datetime(2025, 10, 25, 18, 30, tzinfo=tz).timestamp())
+    assert tour.format_ends(CFG, ts) == "25.10 18:30"

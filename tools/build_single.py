@@ -43,10 +43,11 @@ def _ensure_dependencies():
     try:
         import aiogram  # noqa: F401
         import aiosqlite  # noqa: F401
+        import tzdata  # noqa: F401  часовые пояса, если их нет в системе
         return
     except ImportError:
         pass
-    packages = ["aiogram>=3.13,<4", "aiosqlite>=0.20"]
+    packages = ["aiogram>=3.13,<4", "aiosqlite>=0.20", "tzdata"]
     base = [sys.executable, "-m", "pip", "install", "--quiet"]
     for extra in ([], ["--user"], ["--break-system-packages"]):
         print("Устанавливаю библиотеки:", " ".join(packages), *extra, flush=True)

@@ -10,7 +10,7 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, tzinfo
 from html import escape
 from zoneinfo import ZoneInfo
 
@@ -25,10 +25,22 @@ log = logging.getLogger(__name__)
 
 MEDALS = ("🥇", "🥈", "🥉")
 
+# На серверах без базы часовых поясов (нет пакета tzdata) ZoneInfo падает.
+# Тогда берём постоянное смещение: в Москве нет перехода на летнее время.
+_FALLBACK_OFFSETS = {"Europe/Moscow": 3, "Europe/Kyiv": 2, "Europe/Kiev": 2, "Europe/Minsk": 3}
+
+
+def zone(name: str) -> tzinfo:
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        log.warning("time zone %s not found, using a fixed UTC offset", name)
+        return timezone(timedelta(hours=_FALLBACK_OFFSETS.get(name, 0)))
+
 
 def week_bounds(now: float, tz: str) -> tuple[int, int]:
     """Начало текущей недели (понедельник 00:00) и начало следующей, в unix-времени."""
-    local = datetime.fromtimestamp(now, ZoneInfo(tz))
+    local = datetime.fromtimestamp(now, zone(tz))
     start = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=7)
     return int(start.timestamp()), int(end.timestamp())
@@ -45,7 +57,7 @@ def winners(cfg: Config, standings: list[aiosqlite.Row], tournament: aiosqlite.R
 
 
 def format_ends(cfg: Config, ts: int) -> str:
-    local = datetime.fromtimestamp(ts, ZoneInfo(cfg.tournament_tz))
+    local = datetime.fromtimestamp(ts, zone(cfg.tournament_tz))
     if local.hour == 0 and local.minute == 0:
         # Полночь показываем как 23:59 предыдущего дня, так понятнее.
         local -= timedelta(minutes=1)
