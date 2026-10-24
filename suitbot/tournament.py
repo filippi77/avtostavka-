@@ -1,10 +1,10 @@
-"""Недельный турнир на бесплатных фишках.
+"""Турнир на бесплатных фишках.
 
-Каждый понедельник в 00:00 (по TOURNAMENT_TZ) начинается новый турнир: всем
+Админ запускает турнир из панели /admin на выбранное число дней. Всем
 участникам выдаётся одинаковое количество турнирных фишек. Их нельзя купить,
-поэтому места в турнире не зависят от покупок за Stars. В конце недели бот
-объявляет первые места, а владельцу присылает список победителей — призы
-он отправляет сам.
+поэтому места не зависят от покупок за Stars. Побеждает тот, у кого к концу
+турнира больше всего турнирных фишек. Бот объявляет первые места в чате,
+а владельцу присылает список победителей — призы он отправляет сам.
 """
 
 import asyncio
@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 import aiosqlite
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .config import Config
 from .db import DB
@@ -44,43 +45,55 @@ def winners(cfg: Config, standings: list[aiosqlite.Row], tournament: aiosqlite.R
 
 
 def format_ends(cfg: Config, ts: int) -> str:
-    # Конец — понедельник 00:00; показываем как "воскресенье 23:59", так понятнее.
-    return datetime.fromtimestamp(ts - 60, ZoneInfo(cfg.tournament_tz)).strftime("%d.%m %H:%M")
+    local = datetime.fromtimestamp(ts, ZoneInfo(cfg.tournament_tz))
+    if local.hour == 0 and local.minute == 0:
+        # Полночь показываем как 23:59 предыдущего дня, так понятнее.
+        local -= timedelta(minutes=1)
+    return local.strftime("%d.%m %H:%M")
+
+
+def place_mark(i: int) -> str:
+    return MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
 
 
 def prizes_text(cfg: Config) -> str:
-    return "\n".join(f"{MEDALS[i] if i < 3 else f'{i + 1}.'} {escape(p)}" for i, p in enumerate(cfg.tournament_prizes))
+    return "\n".join(f"{place_mark(i)} {escape(p)}" for i, p in enumerate(cfg.tournament_prizes))
 
 
 def rules_text(cfg: Config) -> str:
-    return (
+    rules = (
         f"Каждому {cfg.tournament_start_chips} турнирных фишек, ставка до {cfg.tournament_max_bet}. "
-        f"Ставки: <code>/tbet 209 ♥ 50</code>. Турнирные фишки нельзя купить.\n"
-        f"Для приза: минимум {cfg.tournament_min_bets} ставок за неделю "
-        f"и быть в боте не меньше {cfg.tournament_min_days_in_bot} дн."
+        "Побеждает тот, у кого к концу турнира больше всего турнирных фишек. "
+        "Их нельзя купить — у всех равные шансы.\n"
+        f"Для приза нужно сделать минимум {cfg.tournament_min_bets} ставок"
     )
+    if cfg.tournament_min_days_in_bot:
+        rules += f" и быть в боте не меньше {cfg.tournament_min_days_in_bot} дн."
+    return rules + "."
 
 
 def start_text(cfg: Config, tournament: aiosqlite.Row) -> str:
     return (
-        f"🏆 <b>Турнир недели начался!</b> До {format_ends(cfg, tournament['ends_at'])}.\n\n"
-        f"{rules_text(cfg)}\n\n<b>Призы:</b>\n{prizes_text(cfg)}"
+        f"🏆 <b>Турнир начался!</b> До {format_ends(cfg, tournament['ends_at'])}.\n\n"
+        f"{rules_text(cfg)}\n\n<b>Призы:</b>\n{prizes_text(cfg)}\n\n"
+        "Ставьте кнопками под карточкой игры (выберите «🏆 Турнир») или командой "
+        "<code>/tbet 209 ♥ 50</code>. Таблица: /tournament"
     )
 
 
 def results_text(cfg: Config, top: list[aiosqlite.Row]) -> str:
     if not top:
-        return "🏁 <b>Турнир недели окончен.</b> В этот раз никто не выполнил условия для приза."
-    lines = ["🏁 <b>Турнир недели окончен!</b>\n"]
+        return "🏁 <b>Турнир окончен.</b> В этот раз никто не выполнил условия для приза."
+    lines = ["🏁 <b>Турнир окончен!</b>\n"]
     for i, e in enumerate(top):
-        lines.append(f"{MEDALS[i] if i < 3 else f'{i + 1}.'} {escape(e['name'])} — {e['balance']} · {escape(cfg.tournament_prizes[i])}")
-    lines.append("\nПризы отправит администратор в личные сообщения. Новый турнир уже начался!")
+        lines.append(f"{place_mark(i)} {escape(e['name'])} — {e['balance']} · {escape(cfg.tournament_prizes[i])}")
+    lines.append("\nПоздравляем! Призы отправит администратор.")
     return "\n".join(lines)
 
 
 def admin_report(cfg: Config, top: list[aiosqlite.Row]) -> str:
     if not top:
-        return "Турнир окончен, победителей нет."
+        return "🏁 Турнир окончен, победителей нет."
     lines = ["🏁 Турнир окончен. Отправьте призы:\n"]
     for i, e in enumerate(top):
         who = f"@{e['username']}" if e["username"] else f'<a href="tg://user?id={e["user_id"]}">{escape(e["name"])}</a>'
@@ -88,16 +101,42 @@ def admin_report(cfg: Config, top: list[aiosqlite.Row]) -> str:
     return "\n".join(lines)
 
 
-async def broadcast(bot: Bot, chats: set[int] | list[int], text: str) -> None:
+async def join_keyboard(bot: Bot) -> InlineKeyboardMarkup:
+    me = await bot.me()
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="▶️ Начать играть", url=f"https://t.me/{me.username}?start=join")
+    ]])
+
+
+async def announce_chats(cfg: Config, db: DB, tournament_id: int | None = None) -> set[int]:
+    chats = set(cfg.tournament_chats)
+    main_chat = await db.get_state("main_chat")
+    if main_chat:
+        chats.add(int(main_chat))
+    if tournament_id is not None:
+        chats.update(await db.tournament_chats(tournament_id))
+    return chats
+
+
+async def broadcast(bot: Bot, chats: set[int] | list[int], text: str, reply_markup=None) -> None:
     for chat_id in chats:
         try:
-            await bot.send_message(chat_id, text)
+            await bot.send_message(chat_id, text, reply_markup=reply_markup)
         except Exception:
             log.exception("failed to send to %s", chat_id)
 
 
+async def start(cfg: Config, db: DB, bot: Bot, ends_at: int) -> aiosqlite.Row | None:
+    """Запускает турнир до ends_at. Возвращает None, если турнир уже идёт."""
+    if await db.active_tournament():
+        return None
+    tournament = await db.get_tournament(await db.create_tournament(int(time.time()), ends_at))
+    await broadcast(bot, await announce_chats(cfg, db), start_text(cfg, tournament), await join_keyboard(bot))
+    return tournament
+
+
 async def finish(cfg: Config, db: DB, bot: Bot, tournament: aiosqlite.Row) -> None:
-    chats = cfg.tournament_chats or set(await db.tournament_chats(tournament["id"]))
+    chats = await announce_chats(cfg, db, tournament["id"])
     if not await db.finish_tournament(tournament["id"]):
         return
     top = winners(cfg, await db.standings(tournament["id"]), tournament)
@@ -111,10 +150,9 @@ async def tick(cfg: Config, db: DB, bot: Bot, now: float | None = None) -> None:
     if current and now >= current["ends_at"]:
         await finish(cfg, db, bot, current)
         current = None
-    if current is None:
+    if current is None and cfg.tournament_auto:
         _, end = week_bounds(now, cfg.tournament_tz)
-        tournament_id = await db.create_tournament(int(now), end)
-        await broadcast(bot, cfg.tournament_chats, start_text(cfg, await db.get_tournament(tournament_id)))
+        await start(cfg, db, bot, end)
 
 
 async def loop(cfg: Config, db: DB, bot: Bot) -> None:
@@ -123,4 +161,4 @@ async def loop(cfg: Config, db: DB, bot: Bot) -> None:
             await tick(cfg, db, bot)
         except Exception:
             log.exception("tournament tick failed")
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)

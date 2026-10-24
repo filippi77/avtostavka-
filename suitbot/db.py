@@ -9,7 +9,10 @@ CREATE TABLE IF NOT EXISTS users (
     username    TEXT,
     balance     INTEGER NOT NULL,
     last_bonus  INTEGER NOT NULL DEFAULT 0,
-    created_at  INTEGER NOT NULL DEFAULT 0
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    -- что выбрано на кнопках карточки игры: сумма и кошелёк (main | tour)
+    pref_stake  INTEGER NOT NULL DEFAULT 50,
+    pref_wallet TEXT NOT NULL DEFAULT 'tour'
 );
 CREATE TABLE IF NOT EXISTS bets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +56,15 @@ CREATE TABLE IF NOT EXISTS payments (
     stars       INTEGER NOT NULL,
     chips       INTEGER NOT NULL,
     created_at  INTEGER NOT NULL
+);
+-- Карточки игр с кнопками ставок, которые бот публикует в чате.
+CREATE TABLE IF NOT EXISTS cards (
+    game        INTEGER NOT NULL,
+    chat_id     INTEGER NOT NULL,
+    message_id  INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL,
+    closed      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (game, chat_id)
 );
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,
@@ -112,6 +124,13 @@ class DB:
             return 0
         user = await self.get_user(user_id)
         return user["last_bonus"] + period - now
+
+    async def set_pref(self, user_id: int, stake: int | None = None, wallet: str | None = None) -> None:
+        if stake is not None:
+            await self.conn.execute("UPDATE users SET pref_stake = ? WHERE id = ?", (stake, user_id))
+        if wallet is not None:
+            await self.conn.execute("UPDATE users SET pref_wallet = ? WHERE id = ?", (wallet, user_id))
+        await self.conn.commit()
 
     async def top(self, limit: int = 10) -> list[aiosqlite.Row]:
         cur = await self.conn.execute("SELECT name, balance FROM users ORDER BY balance DESC LIMIT ?", (limit,))
@@ -226,9 +245,55 @@ class DB:
         return await cur.fetchone() is not None
 
     async def last_game(self) -> int | None:
-        cur = await self.conn.execute("SELECT value FROM state WHERE key = 'last_game'")
+        value = await self.get_state("last_game")
+        return int(value) if value is not None else None
+
+    # --- настройки из панели управления --------------------------------------
+
+    async def get_state(self, key: str, default: str | None = None) -> str | None:
+        cur = await self.conn.execute("SELECT value FROM state WHERE key = ?", (key,))
         row = await cur.fetchone()
-        return int(row["value"]) if row else None
+        return row["value"] if row else default
+
+    async def set_state(self, key: str, value: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO state(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        await self.conn.commit()
+
+    # --- карточки игр -------------------------------------------------------
+
+    async def get_card(self, game: int, chat_id: int, since: int) -> aiosqlite.Row | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM cards WHERE game = ? AND chat_id = ? AND created_at >= ?", (game, chat_id, since)
+        )
+        return await cur.fetchone()
+
+    async def save_card(self, game: int, chat_id: int, message_id: int) -> None:
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO cards(game, chat_id, message_id, created_at) VALUES (?, ?, ?, ?)",
+            (game, chat_id, message_id, int(time.time())),
+        )
+        await self.conn.commit()
+
+    async def open_cards_for_game(self, game: int, since: int) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute(
+            "SELECT * FROM cards WHERE game = ? AND closed = 0 AND created_at >= ?", (game, since)
+        )
+        return await cur.fetchall()
+
+    async def close_card(self, game: int, chat_id: int) -> None:
+        await self.conn.execute("UPDATE cards SET closed = 1 WHERE game = ? AND chat_id = ?", (game, chat_id))
+        await self.conn.commit()
+
+    async def bet_counts(self, game: int, chat_id: int, since: int) -> dict[str, int]:
+        cur = await self.conn.execute(
+            "SELECT pick, COUNT(*) AS n FROM bets WHERE game = ? AND chat_id = ? AND created_at >= ? GROUP BY pick",
+            (game, chat_id, since),
+        )
+        return {row["pick"]: row["n"] for row in await cur.fetchall()}
 
     # --- платежи ------------------------------------------------------------
 
@@ -304,6 +369,12 @@ class DB:
         )
         await self._refund(await cur.fetchall())
         return True
+
+    async def entries_count(self, tournament_id: int) -> int:
+        cur = await self.conn.execute(
+            "SELECT COUNT(*) AS n FROM tournament_entries WHERE tournament_id = ?", (tournament_id,)
+        )
+        return (await cur.fetchone())["n"]
 
     async def tournament_chats(self, tournament_id: int) -> list[int]:
         cur = await self.conn.execute(

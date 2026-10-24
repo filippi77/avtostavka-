@@ -34,21 +34,28 @@ class Config:
     payout_banker: float = float(os.getenv("PAYOUT_BANKER", "1.95"))
     payout_tie: float = float(os.getenv("PAYOUT_TIE", "8"))
 
-    # Недельный турнир: всем поровну бесплатных фишек, призы раздаёт владелец.
+    # Карточки игр с кнопками: как часто публиковать (каждую N-ю игру, 0 — выключено;
+    # меняется из /admin) и за сколько игр вперёд открывать ставки.
+    card_every: int = int(os.getenv("CARD_EVERY", "5"))
+    card_lead: int = int(os.getenv("CARD_LEAD", "2"))
+
+    # Турнир: всем поровну бесплатных фишек, призы раздаёт владелец.
+    # Запускается из /admin; TOURNAMENT_AUTO=1 — ещё и автоматически каждый понедельник.
     tournament_enabled: bool = os.getenv("TOURNAMENT_ENABLED", "1") == "1"
+    tournament_auto: bool = os.getenv("TOURNAMENT_AUTO", "0") == "1"
     tournament_tz: str = os.getenv("TOURNAMENT_TZ", "Europe/Moscow")
     tournament_start_chips: int = int(os.getenv("TOURNAMENT_START_CHIPS", "1000"))
     tournament_max_bet: int = int(os.getenv("TOURNAMENT_MAX_BET", "500"))
     # Чтобы попасть в призы: сделать минимум ставок и быть в боте не меньше N дней
     # к концу турнира (защита от свежих мультиаккаунтов).
     tournament_min_bets: int = int(os.getenv("TOURNAMENT_MIN_BETS", "20"))
-    tournament_min_days_in_bot: int = int(os.getenv("TOURNAMENT_MIN_DAYS_IN_BOT", "3"))
+    tournament_min_days_in_bot: int = int(os.getenv("TOURNAMENT_MIN_DAYS_IN_BOT", "0"))
     tournament_prizes: tuple[str, ...] = tuple(
         p.strip() for p in os.getenv(
-            "TOURNAMENT_PRIZES", "Telegram Premium на 3 месяца|Подарок от админа|Подарок от админа"
+            "TOURNAMENT_PRIZES", "200 ⭐|100 ⭐|50 ⭐"
         ).split("|") if p.strip()
     )
-    # Куда объявлять начало и итоги. Пусто — во все чаты, где были турнирные ставки.
+    # Куда объявлять начало и итоги, кроме чата, выбранного командой /setchat.
     tournament_chats: set[int] = field(default_factory=lambda: _ids(os.getenv("TOURNAMENT_CHATS", "")))
 
     def payout(self, kind: str, pick: str) -> float:

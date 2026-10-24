@@ -18,28 +18,31 @@ from aiogram.types import (
     User,
 )
 
+from . import admin, betting, cards
 from . import tournament as tour
+from .betting import describe_pick
 from .config import Config
-from .db import DB, InsufficientFunds
+from .db import DB
 from .parser import bet_wins, parse_game, parse_game_number, parse_pick
 
 log = logging.getLogger(__name__)
 
 STAR_PACKS = (50, 100, 250, 500)
-SIDE_NAMES = {"P": "игрок", "B": "банкир", "T": "ничья"}
 
 HELP = (
     "<b>Прогнозы на баккару</b>\n\n"
-    "Ставка: <code>/bet НОМЕР ВЫБОР СУММА</code>\n"
+    "Проще всего ставить кнопками под карточкой игры в чате: выберите сумму, "
+    "затем масть или исход.\n\n"
+    "Или командой: <code>/bet НОМЕР ВЫБОР СУММА</code>\n"
     "  <code>/bet 208 ♥ 50</code> — в картах игрока будет черва\n"
     "  <code>/bet 208 пики 50</code> — масти: ♠ пики, ♣ крести, ♥ черви, ♦ буби\n"
     "  <code>/bet 208 игрок 50</code> — победа игрока / банкир / ничья\n\n"
-    "Коэффициенты: масть ×{suit}, игрок ×{p}, банкир ×{b}, ничья ×{t}\n"
+    "Коэффициенты: масть ×{suit:g}, игрок ×{p:g}, банкир ×{b:g}, ничья ×{t:g}\n"
     "Ставки на игру закрываются, как только в канале появился её пост.\n\n"
     "/balance — баланс и открытые ставки\n"
     "/bonus — ежедневный бонус {bonus} фишек\n"
     "/top — таблица лидеров\n"
-    "/tournament — турнир недели с призами, ставки <code>/tbet</code>\n"
+    "/tournament — турнир с призами, ставки <code>/tbet</code>\n"
     "/buy — купить фишки за Telegram Stars (в личке с ботом)\n\n"
     "Фишки — игровая валюта: их нельзя вывести или обменять на Stars."
 )
@@ -47,10 +50,6 @@ HELP = (
 
 def display_name(user: User) -> str:
     return user.full_name or (f"@{user.username}" if user.username else str(user.id))
-
-
-def describe_pick(kind: str, pick: str) -> str:
-    return pick if kind == "suit" else SIDE_NAMES[pick]
 
 
 def build_router(cfg: Config, db: DB) -> Router:
@@ -61,16 +60,39 @@ def build_router(cfg: Config, db: DB) -> Router:
 
     # --- общие команды ------------------------------------------------------
 
+    def help_text() -> str:
+        return HELP.format(
+            suit=cfg.payout_suit, p=cfg.payout_player, b=cfg.payout_banker,
+            t=cfg.payout_tie, bonus=cfg.daily_bonus,
+        )
+
     @router.message(CommandStart())
+    async def cmd_start(message: Message, command: CommandObject) -> None:
+        # Регистрация — это просто первое обращение к боту: аккаунт со стартовыми
+        # фишками создаётся автоматически (здесь, по команде или по кнопке в чате).
+        user = await user_row(message.from_user)
+        lines = [f"👋 Добро пожаловать, {escape(user['name'])}! На балансе <b>{user['balance']}</b> фишек.\n"]
+        current = await db.active_tournament() if cfg.tournament_enabled else None
+        if current and command.args == "join":
+            entry, _ = await db.join_tournament(current["id"], user["id"], cfg.tournament_start_chips)
+            lines.append(
+                f"🏆 Вы в турнире до {tour.format_ends(cfg, current['ends_at'])}: "
+                f"<b>{entry['balance']}</b> турнирных фишек. Призы:\n{tour.prizes_text(cfg)}\n"
+            )
+        elif current:
+            lines.append("🏆 Сейчас идёт турнир с призами — участвуйте: /tournament\n")
+        lines.append(help_text())
+        await message.answer("\n".join(lines))
+
     @router.message(Command("help"))
     async def cmd_help(message: Message) -> None:
         await user_row(message.from_user)
-        await message.answer(
-            HELP.format(
-                suit=cfg.payout_suit, p=cfg.payout_player, b=cfg.payout_banker,
-                t=cfg.payout_tie, bonus=cfg.daily_bonus,
-            )
-        )
+        await message.answer(help_text())
+
+    @router.message(Command("id"))
+    async def cmd_id(message: Message) -> None:
+        """Подсказка для настройки: id пользователя (для ADMINS) и чата."""
+        await message.reply(f"Ваш id: <code>{message.from_user.id}</code>\nЭтот чат: <code>{message.chat.id}</code>")
 
     @router.message(Command("balance"))
     async def cmd_balance(message: Message) -> None:
@@ -136,57 +158,15 @@ def build_router(cfg: Config, db: DB) -> Router:
             await message.reply("Не понял выбор. " + usage)
             return
         kind, pick = parsed
-
-        max_bet = cfg.tournament_max_bet if tournament_bet else cfg.max_bet
-        if not cfg.min_bet <= amount <= max_bet:
-            await message.reply(f"Ставка от {cfg.min_bet} до {max_bet} фишек.")
-            return
-
-        tournament_id = None
-        if tournament_bet:
-            current = await db.active_tournament() if cfg.tournament_enabled else None
-            if not current or current["ends_at"] <= time.time():
-                await message.reply("Сейчас турнира нет — новый начнётся в понедельник.")
-                return
-            tournament_id = current["id"]
-
-        last = await db.last_game()
-        if last is None:
-            await message.reply("Ещё не видел ни одного поста канала — подождите следующую игру.")
-            return
-        ahead = (game - last) % cfg.game_number_wrap
-        if not 1 <= ahead <= cfg.max_games_ahead:
-            await message.reply(
-                f"Последняя игра #N{last}. Ставки принимаются на #N{last + 1}…#N{last + cfg.max_games_ahead}."
-            )
-            return
-        if await db.game_seen_since(game, int(time.time()) - cfg.bet_ttl_hours * 3600):
-            await message.reply(f"Игра #N{game} уже началась, ставки закрыты.")
-            return
-
         await user_row(message.from_user)
-        if tournament_id is not None:
-            await db.join_tournament(tournament_id, message.from_user.id, cfg.tournament_start_chips)
-        coef = cfg.payout(kind, pick)
         try:
-            await db.place_bet(
-                message.from_user.id, message.chat.id, game, kind, pick, amount, coef, tournament_id
+            text = await betting.place(
+                cfg, db, message.from_user.id, message.chat.id, game, kind, pick, amount, tournament_bet
             )
-        except InsufficientFunds:
-            if tournament_id is not None:
-                entry = await db.get_entry(tournament_id, message.from_user.id)
-                await message.reply(
-                    f"Недостаточно турнирных фишек: осталось {entry['balance']}. Турнирные фишки не докупаются."
-                )
-            else:
-                user = await db.get_user(message.from_user.id)
-                await message.reply(f"Недостаточно фишек: на балансе {user['balance']}. /bonus или /buy")
+        except betting.BetError as e:
+            await message.reply(str(e))
             return
-        prefix = "🏆 Турнирная ставка" if tournament_id is not None else "✅ Ставка"
-        await message.reply(
-            f"{prefix} принята: #N{game} · {describe_pick(kind, pick)} · {amount} ×{coef:g} "
-            f"(выигрыш {int(amount * coef)})"
-        )
+        await message.reply(text)
 
     # --- турнир -------------------------------------------------------------
 
@@ -194,13 +174,13 @@ def build_router(cfg: Config, db: DB) -> Router:
     async def cmd_tournament(message: Message) -> None:
         current = await db.active_tournament() if cfg.tournament_enabled else None
         if not current:
-            await message.reply("Сейчас турнира нет — новый начнётся в понедельник.")
+            await message.reply("Сейчас турнира нет. Следите за объявлениями в чате!")
             return
         user = await user_row(message.from_user)
         entry, joined = await db.join_tournament(current["id"], user["id"], cfg.tournament_start_chips)
         standings = await db.standings(current["id"])
 
-        lines = [f"🏆 <b>Турнир недели</b> · до {tour.format_ends(cfg, current['ends_at'])}"]
+        lines = [f"🏆 <b>Турнир</b> · до {tour.format_ends(cfg, current['ends_at'])}"]
         if joined:
             lines.append(f"Вы в турнире! Выдано {cfg.tournament_start_chips} турнирных фишек.")
         lines += ["", tour.rules_text(cfg), "", "<b>Призы:</b>", tour.prizes_text(cfg), "", "<b>Таблица:</b>"]
@@ -212,17 +192,6 @@ def build_router(cfg: Config, db: DB) -> Router:
         me = standings[place - 1]
         lines.append(f"\nВы: {place} место · {me['balance']} фишек · ставок {me['bets_count']}/{cfg.tournament_min_bets}")
         await message.reply("\n".join(lines))
-
-    @router.message(Command("tend"), F.from_user.id.in_(cfg.admins))
-    async def cmd_tend(message: Message, bot: Bot) -> None:
-        """Досрочно завершить текущий турнир и сразу начать новый."""
-        current = await db.active_tournament()
-        if not current:
-            await message.reply("Активного турнира нет.")
-            return
-        await tour.finish(cfg, db, bot, current)
-        await tour.tick(cfg, db, bot)
-        await message.reply("Турнир завершён, новый начат.")
 
     # --- результаты из канала ----------------------------------------------
 
@@ -238,10 +207,26 @@ def build_router(cfg: Config, db: DB) -> Router:
         if number is None or not from_results_source(message):
             return
         await db.mark_game_seen(number, fresh_after=int(time.time()) - cfg.bet_ttl_hours * 3600)
+        await cards.close_for_game(cfg, db, bot, number)
 
         result = parse_game(text)
         if not result or not result.finished:
             return
+        await settle(result, bot)
+
+        main_chat = await db.get_state("main_chat")
+        if main_chat:
+            card_chat = int(main_chat)
+        elif message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            card_chat = message.chat.id
+        else:
+            return
+        try:
+            await cards.maybe_post(cfg, db, bot, result.number, card_chat)
+        except Exception:
+            log.exception("failed to post game card to %s", card_chat)
+
+    async def settle(result, bot: Bot) -> None:
         bets = await db.open_bets_for_game(result.number)
         if not bets:
             return
@@ -368,7 +353,12 @@ async def main() -> None:
     await db.open()
     bot = Bot(cfg.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
-    dp.include_router(build_router(cfg, db))
+    main_router = build_router(cfg, db)
+    dp.include_router(admin.build_router(cfg, db))
+    dp.include_router(cards.build_router(
+        cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username)
+    ))
+    dp.include_router(main_router)
     tasks = [asyncio.create_task(refund_loop(cfg, db))]
     if cfg.tournament_enabled:
         tasks.append(asyncio.create_task(tour.loop(cfg, db, bot)))
