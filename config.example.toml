@@ -1,0 +1,50 @@
+# Скопируйте в config.toml и настройте под себя.
+
+db_path = "avtostavka.db"
+poll_interval_sec = 60
+dry_run = true            # true — бумажные ставки, реальные деньги не используются
+
+[strategy]
+reference_bookmakers = ["pinnacle"]   # по ним считается «честная» вероятность
+target_bookmakers = []                # где ставить; пусто — все, кроме ориентиров
+min_edge = 0.03                       # минимальный перевес: p * k - 1 >= 3%
+max_edge = 0.25                       # больший перевес считаем ошибкой данных
+min_odds = 1.4
+max_odds = 6.0
+min_minutes_to_start = 5
+max_hours_to_start = 48
+one_bet_per_market = true
+sports = []
+markets = []
+
+[staking]
+method = "kelly"          # fixed | percent | kelly
+fixed_amount = 10.0
+percent = 0.01
+kelly_fraction = 0.25     # четверть Келли — меньше дисперсия
+min_stake = 1.0
+max_stake = 100.0
+round_to = 0.01
+
+[risk]
+starting_bankroll = 1000.0
+max_open_bets = 20
+max_stake_pct = 0.05
+max_event_exposure_pct = 0.10
+daily_loss_limit_pct = 0.10
+max_drawdown_pct = 0.30
+max_bets_per_day = 50
+
+[provider]
+odds_source = "file"      # file | theoddsapi
+odds_file = "examples/odds.json"
+results_file = "examples/results.json"
+executor = "paper"
+api_key_env = "ODDS_API_KEY"
+regions = "eu"
+theoddsapi_sports = ["soccer_epl"]
+timeout_sec = 15.0
+
+[notify]
+telegram_token_env = "TELEGRAM_BOT_TOKEN"
+telegram_chat_id = ""
