@@ -17,6 +17,8 @@ CFG = replace(Config(token="x"), admins={42}, tournament_chats={-100}, tournamen
 
 
 class FakeBot:
+    id = 1
+
     def __init__(self):
         self.sent: list[tuple[int, str]] = []
         self.edits: list[str] = []
@@ -257,3 +259,28 @@ def test_subscription_checker():
         assert subs.channel_url == "https://t.me/stat_bakkara"
 
     asyncio.run(go())
+
+
+def test_group_with_channel_posts_becomes_main_chat(tmp_path):
+    import datetime
+
+    from aiogram import Dispatcher
+    from aiogram.types import Update
+
+    from suitbot.access import SubscriptionChecker
+    from suitbot.bot import build_router
+
+    async def body(db):
+        bot = FakeBot()
+        dp = Dispatcher()
+        dp.include_router(build_router(CFG, db, SubscriptionChecker(CFG)))
+        update = Update.model_validate({"update_id": 1, "message": {
+            "message_id": 1, "date": datetime.datetime.now(), "text": "⏳ #N272. ▶️ 2(7♣️ 5♥️) - 2(6♠️ 6♦️)",
+            "chat": {"id": -100777, "type": "supergroup", "title": "Baccara Chat"},
+            "sender_chat": {"id": -200, "type": "channel", "title": "Statistika"}, "is_automatic_forward": True,
+        }})
+        await dp.feed_update(bot, update)
+        assert await db.get_state("main_chat") == "-100777"
+        assert bot.sent[0][0] == -100777 and "Игра #N273" in bot.sent[0][1]
+
+    run_with_db(tmp_path, body)

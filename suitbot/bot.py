@@ -286,7 +286,10 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         if main_chat:
             card_chat = int(main_chat)
         elif message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            # Первая группа, куда приходят посты канала, становится основным чатом —
+            # туда же пойдут объявления турнира и приглашение. /setchat может это сменить.
             card_chat = message.chat.id
+            await db.set_state("main_chat", str(card_chat))
         else:
             return
         try:

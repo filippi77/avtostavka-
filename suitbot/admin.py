@@ -46,7 +46,7 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         except Exception:
             chat_title = f"{main_chat} (бот не видит чат)"
     else:
-        chat_title = "не выбран — напишите /setchat в нужной группе"
+        chat_title = "выберется сам с первым постом канала в группе (или /setchat)"
 
     current = await db.active_tournament()
     every = await cards.card_every(cfg, db)
