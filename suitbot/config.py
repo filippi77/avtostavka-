@@ -34,6 +34,23 @@ class Config:
     payout_banker: float = float(os.getenv("PAYOUT_BANKER", "1.95"))
     payout_tie: float = float(os.getenv("PAYOUT_TIE", "8"))
 
+    # Недельный турнир: всем поровну бесплатных фишек, призы раздаёт владелец.
+    tournament_enabled: bool = os.getenv("TOURNAMENT_ENABLED", "1") == "1"
+    tournament_tz: str = os.getenv("TOURNAMENT_TZ", "Europe/Moscow")
+    tournament_start_chips: int = int(os.getenv("TOURNAMENT_START_CHIPS", "1000"))
+    tournament_max_bet: int = int(os.getenv("TOURNAMENT_MAX_BET", "500"))
+    # Чтобы попасть в призы: сделать минимум ставок и быть в боте не меньше N дней
+    # к концу турнира (защита от свежих мультиаккаунтов).
+    tournament_min_bets: int = int(os.getenv("TOURNAMENT_MIN_BETS", "20"))
+    tournament_min_days_in_bot: int = int(os.getenv("TOURNAMENT_MIN_DAYS_IN_BOT", "3"))
+    tournament_prizes: tuple[str, ...] = tuple(
+        p.strip() for p in os.getenv(
+            "TOURNAMENT_PRIZES", "Telegram Premium на 3 месяца|Подарок от админа|Подарок от админа"
+        ).split("|") if p.strip()
+    )
+    # Куда объявлять начало и итоги. Пусто — во все чаты, где были турнирные ставки.
+    tournament_chats: set[int] = field(default_factory=lambda: _ids(os.getenv("TOURNAMENT_CHATS", "")))
+
     def payout(self, kind: str, pick: str) -> float:
         if kind == "suit":
             return self.payout_suit

@@ -6,8 +6,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY,
     name        TEXT NOT NULL,
+    username    TEXT,
     balance     INTEGER NOT NULL,
-    last_bonus  INTEGER NOT NULL DEFAULT 0
+    last_bonus  INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS bets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,9 +22,26 @@ CREATE TABLE IF NOT EXISTS bets (
     coef        REAL NOT NULL,
     status      TEXT NOT NULL DEFAULT 'open',  -- open | won | lost | refunded
     payout      INTEGER NOT NULL DEFAULT 0,
+    wallet      TEXT NOT NULL DEFAULT 'main',  -- main | tour
+    tournament_id INTEGER REFERENCES tournaments(id),
     created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS bets_open ON bets(status, game);
+CREATE TABLE IF NOT EXISTS tournaments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    starts_at   INTEGER NOT NULL,
+    ends_at     INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active'  -- active | finished
+);
+-- Турнирные фишки живут отдельно от обычных: их нельзя купить или получить бонусом.
+CREATE TABLE IF NOT EXISTS tournament_entries (
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    balance     INTEGER NOT NULL,
+    bets_count  INTEGER NOT NULL DEFAULT 0,
+    joined_at   INTEGER NOT NULL,
+    PRIMARY KEY (tournament_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS games (
     number      INTEGER PRIMARY KEY,
     seen_at     INTEGER NOT NULL,
@@ -62,11 +81,13 @@ class DB:
 
     # --- пользователи -------------------------------------------------------
 
-    async def ensure_user(self, user_id: int, name: str, start_balance: int) -> aiosqlite.Row:
+    async def ensure_user(
+        self, user_id: int, name: str, start_balance: int, username: str | None = None
+    ) -> aiosqlite.Row:
         await self.conn.execute(
-            "INSERT INTO users(id, name, balance) VALUES (?, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET name = excluded.name",
-            (user_id, name, start_balance),
+            "INSERT INTO users(id, name, username, balance, created_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET name = excluded.name, username = excluded.username",
+            (user_id, name, username, start_balance, int(time.time())),
         )
         await self.conn.commit()
         return await self.get_user(user_id)
@@ -99,23 +120,41 @@ class DB:
     # --- ставки -------------------------------------------------------------
 
     async def place_bet(
-        self, user_id: int, chat_id: int, game: int, kind: str, pick: str, amount: int, coef: float
+        self, user_id: int, chat_id: int, game: int, kind: str, pick: str, amount: int, coef: float,
+        tournament_id: int | None = None,
     ) -> int:
         # Списание и запись ставки — одной транзакцией, чтобы баланс не ушёл в минус.
-        cur = await self.conn.execute(
-            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-            (amount, user_id, amount),
-        )
+        if tournament_id is None:
+            cur = await self.conn.execute(
+                "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+                (amount, user_id, amount),
+            )
+        else:
+            cur = await self.conn.execute(
+                "UPDATE tournament_entries SET balance = balance - ?, bets_count = bets_count + 1 "
+                "WHERE tournament_id = ? AND user_id = ? AND balance >= ?",
+                (amount, tournament_id, user_id, amount),
+            )
         if not cur.rowcount:
             await self.conn.rollback()
             raise InsufficientFunds
         cur = await self.conn.execute(
-            "INSERT INTO bets(user_id, chat_id, game, kind, pick, amount, coef, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, chat_id, game, kind, pick, amount, coef, int(time.time())),
+            "INSERT INTO bets(user_id, chat_id, game, kind, pick, amount, coef, wallet, tournament_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, chat_id, game, kind, pick, amount, coef,
+             "main" if tournament_id is None else "tour", tournament_id, int(time.time())),
         )
         await self.conn.commit()
         return cur.lastrowid
+
+    async def _credit(self, bet: aiosqlite.Row, amount: int) -> None:
+        if bet["wallet"] == "tour":
+            await self.conn.execute(
+                "UPDATE tournament_entries SET balance = balance + ? WHERE tournament_id = ? AND user_id = ?",
+                (amount, bet["tournament_id"], bet["user_id"]),
+            )
+        else:
+            await self.conn.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (amount, bet["user_id"]))
 
     async def open_bets_for_game(self, game: int) -> list[aiosqlite.Row]:
         cur = await self.conn.execute(
@@ -137,27 +176,25 @@ class DB:
             ("won" if won else "lost", payout, bet_id),
         )
         if cur.rowcount and payout:
-            await self.conn.execute(
-                "UPDATE users SET balance = balance + ? "
-                "WHERE id = (SELECT user_id FROM bets WHERE id = ?)",
-                (payout, bet_id),
-            )
+            cur2 = await self.conn.execute("SELECT * FROM bets WHERE id = ?", (bet_id,))
+            await self._credit(await cur2.fetchone(), payout)
         await self.conn.commit()
         return bool(cur.rowcount)
+
+    async def _refund(self, bets: list[aiosqlite.Row]) -> None:
+        for bet in bets:
+            await self.conn.execute(
+                "UPDATE bets SET status = 'refunded', payout = amount WHERE id = ?", (bet["id"],)
+            )
+            await self._credit(bet, bet["amount"])
+        await self.conn.commit()
 
     async def refund_stale_bets(self, older_than: int) -> list[aiosqlite.Row]:
         cur = await self.conn.execute(
             "SELECT * FROM bets WHERE status = 'open' AND created_at < ?", (older_than,)
         )
         stale = await cur.fetchall()
-        for bet in stale:
-            await self.conn.execute(
-                "UPDATE bets SET status = 'refunded', payout = amount WHERE id = ?", (bet["id"],)
-            )
-            await self.conn.execute(
-                "UPDATE users SET balance = balance + ? WHERE id = ?", (bet["amount"], bet["user_id"])
-            )
-        await self.conn.commit()
+        await self._refund(stale)
         return stale
 
     # --- игры ---------------------------------------------------------------
@@ -206,3 +243,70 @@ class DB:
             await self.conn.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (chips, user_id))
         await self.conn.commit()
         return bool(cur.rowcount)
+
+    # --- турниры ------------------------------------------------------------
+
+    async def active_tournament(self) -> aiosqlite.Row | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM tournaments WHERE status = 'active' ORDER BY id DESC LIMIT 1"
+        )
+        return await cur.fetchone()
+
+    async def get_tournament(self, tournament_id: int) -> aiosqlite.Row | None:
+        cur = await self.conn.execute("SELECT * FROM tournaments WHERE id = ?", (tournament_id,))
+        return await cur.fetchone()
+
+    async def create_tournament(self, starts_at: int, ends_at: int) -> int:
+        cur = await self.conn.execute(
+            "INSERT INTO tournaments(starts_at, ends_at) VALUES (?, ?)", (starts_at, ends_at)
+        )
+        await self.conn.commit()
+        return cur.lastrowid
+
+    async def join_tournament(self, tournament_id: int, user_id: int, start_balance: int) -> tuple[aiosqlite.Row, bool]:
+        """Возвращает (участие, только что вступил)."""
+        cur = await self.conn.execute(
+            "INSERT OR IGNORE INTO tournament_entries(tournament_id, user_id, balance, joined_at) "
+            "VALUES (?, ?, ?, ?)",
+            (tournament_id, user_id, start_balance, int(time.time())),
+        )
+        await self.conn.commit()
+        return await self.get_entry(tournament_id, user_id), bool(cur.rowcount)
+
+    async def get_entry(self, tournament_id: int, user_id: int) -> aiosqlite.Row | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM tournament_entries WHERE tournament_id = ? AND user_id = ?",
+            (tournament_id, user_id),
+        )
+        return await cur.fetchone()
+
+    async def standings(self, tournament_id: int) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute(
+            "SELECT e.*, u.name, u.username, u.created_at AS user_created_at "
+            "FROM tournament_entries e JOIN users u ON u.id = e.user_id "
+            "WHERE e.tournament_id = ? "
+            "ORDER BY e.balance DESC, e.bets_count DESC, e.joined_at",
+            (tournament_id,),
+        )
+        return await cur.fetchall()
+
+    async def finish_tournament(self, tournament_id: int) -> bool:
+        """Закрывает турнир; нерассчитанные ставки возвращаются до подсчёта мест."""
+        cur = await self.conn.execute(
+            "UPDATE tournaments SET status = 'finished' WHERE id = ? AND status = 'active'",
+            (tournament_id,),
+        )
+        if not cur.rowcount:
+            await self.conn.commit()
+            return False
+        cur = await self.conn.execute(
+            "SELECT * FROM bets WHERE status = 'open' AND tournament_id = ?", (tournament_id,)
+        )
+        await self._refund(await cur.fetchall())
+        return True
+
+    async def tournament_chats(self, tournament_id: int) -> list[int]:
+        cur = await self.conn.execute(
+            "SELECT DISTINCT chat_id FROM bets WHERE tournament_id = ? AND chat_id < 0", (tournament_id,)
+        )
+        return [row["chat_id"] for row in await cur.fetchall()]
