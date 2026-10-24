@@ -21,7 +21,11 @@ class Config:
     result_sources: set[int | str] = field(default_factory=lambda: _chats(os.getenv("RESULT_SOURCES", "")))
     admins: set[int] = field(default_factory=lambda: _ids(os.getenv("ADMINS", "")))
 
-    chips_per_star: int = int(os.getenv("CHIPS_PER_STAR", "10"))
+    chips_per_star: int = int(os.getenv("CHIPS_PER_STAR", "1000"))
+    # Пакеты для покупки, в звёздах (минимум у Telegram — 1 звезда).
+    star_packs: tuple[int, ...] = tuple(int(x) for x in os.getenv("STAR_PACKS", "1,5,10,50").split(",") if x.strip())
+    # Контакт для вопросов по оплате (команда /paysupport, её требует Telegram).
+    support_contact: str = os.getenv("SUPPORT_CONTACT", "")
     start_balance: int = int(os.getenv("START_BALANCE", "500"))
     # Бонус: сколько фишек и как часто (в днях) можно забирать.
     bonus_amount: int = int(os.getenv("BONUS_AMOUNT", "300"))

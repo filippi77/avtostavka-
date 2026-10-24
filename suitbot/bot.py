@@ -31,8 +31,6 @@ from .parser import bet_wins, parse_game, parse_game_number, parse_pick, suit_em
 
 log = logging.getLogger(__name__)
 
-STAR_PACKS = (50, 100, 250, 500)
-
 # Кнопки панели игрока в личке с ботом.
 BTN_BALANCE = "💰 Мой баланс"
 BTN_BONUS = "🎁 Бонус"
@@ -338,6 +336,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
     # --- покупка фишек за Stars ---------------------------------------------
 
     @router.message(Command("buy"))
+    @router.message(F.text == BTN_BUY)
     async def cmd_buy(message: Message, bot: Bot) -> None:
         if message.chat.type != ChatType.PRIVATE:
             me = await bot.me()
@@ -346,7 +345,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text=f"⭐ {s} → {s * cfg.chips_per_star} фишек", callback_data=f"buy:{s}")]
-                for s in STAR_PACKS
+                for s in cfg.star_packs
             ]
         )
         await message.answer("Выберите пакет фишек:", reply_markup=kb)
@@ -354,7 +353,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
     @router.callback_query(F.data.startswith("buy:"))
     async def cb_buy(query: CallbackQuery, bot: Bot) -> None:
         stars = int(query.data.split(":")[1])
-        if stars not in STAR_PACKS:
+        if stars not in cfg.star_packs:
             await query.answer()
             return
         chips = stars * cfg.chips_per_star
@@ -384,8 +383,9 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
 
     @router.message(Command("paysupport"))
     async def cmd_paysupport(message: Message) -> None:
+        contact = cfg.support_contact or "администратору бота"
         await message.answer(
-            "По вопросам оплаты напишите администратору бота. "
+            f"По вопросам оплаты напишите {escape(contact)}. "
             "Укажите дату покупки — возврат Stars делается вручную."
         )
 
