@@ -13,6 +13,11 @@ from dataclasses import dataclass
 
 SUITS = "♠♣♥♦"
 
+
+def suit_emoji(suit: str) -> str:
+    """Масть для вывода: с вариационным селектором Telegram рисует её цветным эмодзи."""
+    return suit + "\ufe0f"
+
 SUIT_ALIASES = {
     "♠": "♠", "пики": "♠", "пика": "♠", "п": "♠",
     "♣": "♣", "крести": "♣", "трефы": "♣", "треф": "♣", "к": "♣",

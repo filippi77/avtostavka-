@@ -4,6 +4,7 @@ import time
 
 from .config import Config
 from .db import DB, InsufficientFunds
+from .parser import suit_emoji
 
 SIDE_NAMES = {"P": "игрок", "B": "банкир", "T": "ничья"}
 
@@ -13,7 +14,7 @@ class BetError(Exception):
 
 
 def describe_pick(kind: str, pick: str) -> str:
-    return pick if kind == "suit" else SIDE_NAMES[pick]
+    return suit_emoji(pick) if kind == "suit" else SIDE_NAMES[pick]
 
 
 async def place(

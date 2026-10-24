@@ -26,7 +26,7 @@ from .access import SubscriptionChecker
 from .betting import describe_pick
 from .config import Config
 from .db import DB
-from .parser import bet_wins, parse_game, parse_game_number, parse_pick
+from .parser import bet_wins, parse_game, parse_game_number, parse_pick, suit_emoji
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ HELP = (
     "Выберите сумму 💰 (и 🏆 Турнир, если идёт турнир), затем масть или исход. "
     "Ставки принимаются, пока идёт предыдущая игра, и закрываются, как только начинается игра карточки.\n\n"
     "<b>На что ставить:</b>\n"
-    "♠ ♣ ♥ ♦ — эта масть будет в картах игрока, ×{suit:g}\n"
+    "♠️ ♣️ ♥️ ♦️ — эта масть будет в картах игрока, ×{suit:g}\n"
     "Игрок / Банкир — кто выиграет раздачу, ×{p:g} / ×{b:g}\n"
     "Ничья — ×{t:g}\n\n"
     "Можно и командой: <code>/bet 208 ♥ 50</code>, <code>/bet 208 игрок 50</code>, "
@@ -311,8 +311,8 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
                 f"{cup}{escape(bet['name'])}: {describe_pick(bet['kind'], bet['pick'])} {mark}"
             )
 
-        player = " ".join(r + s for r, s in result.player_cards)
-        banker = " ".join(r + s for r, s in result.banker_cards)
+        player = " ".join(r + suit_emoji(s) for r, s in result.player_cards)
+        banker = " ".join(r + suit_emoji(s) for r, s in result.banker_cards)
         header = (
             f"🎴 <b>#N{result.number}</b>: игрок {result.player_points} ({player}) — "
             f"банкир {result.banker_points} ({banker})"

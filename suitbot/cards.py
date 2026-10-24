@@ -19,6 +19,7 @@ from . import betting, rating
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
+from .parser import SUITS, suit_emoji
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def frequency_label(every: int) -> str:
 
 def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
     status = "ставки закрыты" if closed else "ставки открыты"
-    picks = " · ".join(f"{s} {counts.get(s, 0)}" for s in "♠♣♥♦")
+    picks = " · ".join(f"{suit_emoji(s)} {counts.get(s, 0)}" for s in SUITS)
     sides = f"Игрок {counts.get('P', 0)} · Банкир {counts.get('B', 0)} · Ничья {counts.get('T', 0)}"
     lines = [
         f"🎴 <b>Игра #N{game}</b> — {status}",
@@ -53,7 +54,7 @@ def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tour
 
 def card_keyboard(game: int, tournament_on: bool, bot_username: str | None) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=s, callback_data=f"b:{game}:suit:{s}") for s in "♠♣♥♦"],
+        [InlineKeyboardButton(text=suit_emoji(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
         [
             InlineKeyboardButton(text=f"{name.capitalize()}", callback_data=f"b:{game}:side:{code}")
             for code, name in betting.SIDE_NAMES.items()
