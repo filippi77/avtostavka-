@@ -94,6 +94,17 @@ def build_router(cfg: Config, db: DB) -> Router:
         text, kb = await panel(cfg, db, bot)
         await message.answer(text, reply_markup=kb)
 
+    @router.message(Command("admin"))
+    async def cmd_admin_denied(message: Message) -> None:
+        # Сюда попадают все, кого нет в ADMINS: подсказываем, что вписать, вместо молчания.
+        if message.from_user is None or message.sender_chat is not None:
+            await message.reply("Команду нужно писать от своего личного аккаунта, а не от имени канала.")
+            return
+        await message.reply(
+            f"Нет доступа к панели. Ваш id: <code>{message.from_user.id}</code>\n"
+            "Впишите его в настройку ADMINS (в начале файла бота) и перезапустите бота."
+        )
+
     @router.message(Command("setchat"), is_admin, F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
     async def cmd_setchat(message: Message) -> None:
         await db.set_state("main_chat", str(message.chat.id))

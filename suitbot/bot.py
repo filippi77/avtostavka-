@@ -420,6 +420,8 @@ async def refund_loop(cfg: Config, db: DB) -> None:
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     cfg = Config()
+    log.info("admins: %s, result sources: %s, required channel: %s",
+             sorted(cfg.admins) or "не заданы", cfg.result_sources or "любые", cfg.required_channel or "нет")
     db = DB(cfg.db_path)
     await db.open()
     bot = Bot(cfg.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
