@@ -129,7 +129,7 @@ PEN_TEAMS = {
 # ----- 🃏 21 очко -----
 # Канал «21 очко Авто» с сигналами AUTO21 (формат — SIGNAL21.md). Можно задать
 # здесь, в autobet.env (AUTOBET_G21_CHANNEL) или кнопкой, когда придёт первый пост.
-G21_CHANNEL = int(os.environ.get("AUTOBET_G21_CHANNEL", "0") or 0)
+G21_CHANNEL = int(os.environ.get("AUTOBET_G21_CHANNEL", "-1004380611765") or 0)  # «21 очко автоставка»
 G21_SEARCH_PATH = "/ru/search-events?searchtext=21+ochko"
 G21_GAME_TITLE = "21 Очко"
 # код исхода в сигнале → (рынок в боте, заголовок блока на сайте, слово в купоне)
