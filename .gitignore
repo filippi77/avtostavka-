@@ -3,3 +3,5 @@ __pycache__/
 *.db
 config.toml
 examples/history_*.json
+dbbet/autobet.env
+dbbet/autobet_state.json
