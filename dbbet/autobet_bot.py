@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import collections
 import copy
 import datetime
 import html
@@ -155,7 +156,30 @@ MARKETS = ("ТМ", "ТБ", "П1", "П2", "ГОЛД", "РАЗДАЧА")
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML", threaded=False)
 lock = threading.RLock()
-jobs = queue.Queue()
+class JobQueue(queue.Queue):
+  """Очередь заданий браузера: 🃏 21 очко идёт первым — игра каждую минуту,
+  ждать за долгими поисками пенальти/тенниса нельзя."""
+
+  def _init(self, maxsize):
+    self.urgent = collections.deque()
+    self.normal = collections.deque()
+
+  def _qsize(self):
+    return len(self.urgent) + len(self.normal)
+
+  def _put(self, job):
+    payload = job.get("sig") or job.get("result") or {}
+    (self.urgent if payload.get("game") == "g21" else self.normal).append(job)
+
+  def _get(self):
+    return self.urgent.popleft() if self.urgent else self.normal.popleft()
+
+  def urgent_waiting(self):
+    with self.mutex:
+      return len(self.urgent)
+
+
+jobs = JobQueue()
 announced_channels = set()
 
 
@@ -2757,15 +2781,14 @@ def job_bet(page, job):
   max_age = {"g21": G21_SIGNAL_MAX_AGE, "penalty": PEN_SIGNAL_MAX_AGE}.get(game)
   age = time.time() - float(job.get("received_at") or time.time())
   if max_age and age > max_age:
-    send(f"⏭ {html.escape(describe(sig))}: сигнал устарел ({int(age // 60)} мин"
-         f" {int(age % 60)} с) — пропускаю, игра уже прошла")
-    return  # без браузера: после перезапуска старые сигналы не ищем на сайте
+    print(f"⏭ {describe(sig)}: сигнал устарел ({int(age)} с) — пропуск")
+    return  # без браузера и без сообщения: после перезапуска таких десятки
 
   if game == "g21":
     stale = g21_stale(sig.get("match_no") or 0)
     if stale:
-      send(f"⏭ {html.escape(describe(sig))}: {html.escape(stale)}")
-      return  # без браузера и скриншота — очередь сразу идёт дальше
+      print(f"⏭ {describe(sig)}: {stale}")
+      return  # без браузера и сообщения — очередь сразу идёт дальше
 
   reject_reason = None
   with lock:
@@ -2914,6 +2937,10 @@ def job_bet(page, job):
           except Exception:
             pass
 
+      if attempt < MAX_RETRIES and game != "g21" and jobs.urgent_waiting():
+        return not_placed(
+            f"{last_error} · повторы прерваны: в очереди ставки 🃏 21 очко"
+        )
       if attempt < MAX_RETRIES:
         send(
             f"⏳ Попытка {attempt}/{MAX_RETRIES} не удалась: "
