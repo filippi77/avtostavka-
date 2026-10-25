@@ -19,13 +19,23 @@ from telebot import types
 # ================== НАСТРОЙКИ ==================
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
-SECRETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autobet.env")
+BOT_DIR = os.path.dirname(os.path.abspath(__file__))
+SECRETS_FILE = os.path.join(BOT_DIR, "autobet.env")
+
+
+def _find_secrets():
+  """autobet.env, а если его нет — похожий файл (autobet.env.txt, autobet (1).env…)."""
+  if os.path.exists(SECRETS_FILE):
+    return SECRETS_FILE
+  for name in sorted(os.listdir(BOT_DIR)):
+    low = name.lower()
+    if low.startswith("autobet") and ".env" in low and "example" not in low:
+      return os.path.join(BOT_DIR, name)
+  return None
 
 
 def _load_secrets(path):
-  if not os.path.exists(path) and os.path.exists(path + ".txt"):
-    path += ".txt"  # Блокнот/браузер мог дописать .txt
-  if not os.path.exists(path):
+  if not path:
     return
   # utf-8-sig: Блокнот Windows ставит в начало файла невидимый BOM
   with open(path, encoding="utf-8-sig") as fh:
@@ -36,14 +46,18 @@ def _load_secrets(path):
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-_load_secrets(SECRETS_FILE)
+_secrets_path = _find_secrets()
+_load_secrets(_secrets_path)
 
 BOT_TOKEN = os.environ.get("AUTOBET_BOT_TOKEN", "")
 ADMIN_ID = int(os.environ.get("AUTOBET_ADMIN_ID", "0") or 0)
 if not BOT_TOKEN or not ADMIN_ID:
   raise SystemExit(
       f"Заполни AUTOBET_BOT_TOKEN и AUTOBET_ADMIN_ID в {SECRETS_FILE}"
-      " (образец — autobet.env.example)"
+      " (образец — autobet.env.example). "
+      + (f"Прочитан файл {os.path.basename(_secrets_path)}, но в нём нет этих строк."
+         if _secrets_path else
+         "Файл не найден. В папке лежат: " + ", ".join(sorted(os.listdir(BOT_DIR))))
   )
 
 CDP_URL = "http://127.0.0.1:9222"  # порт отладки Opera
