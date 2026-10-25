@@ -20,6 +20,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .config import Config
 from .db import DB
+from .i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -73,33 +74,24 @@ def prizes_text(cfg: Config) -> str:
 
 
 def rules_text(cfg: Config) -> str:
-    rules = (
-        f"Каждому {cfg.tournament_start_chips} турнирных фишек, ставка до {cfg.tournament_max_bet}. "
-        "Побеждает тот, у кого к концу турнира больше всего турнирных фишек. "
-        "Их нельзя купить — у всех равные шансы.\n"
-        f"Для приза нужно сделать минимум {cfg.tournament_min_bets} ставок"
-    )
+    rules = t("tour_rules", chips=cfg.tournament_start_chips, max_bet=cfg.tournament_max_bet,
+              min_bets=cfg.tournament_min_bets)
     if cfg.tournament_min_days_in_bot:
-        rules += f" и быть в боте не меньше {cfg.tournament_min_days_in_bot} дн."
+        rules += t("tour_rules_days", days=cfg.tournament_min_days_in_bot)
     return rules + "."
 
 
 def start_text(cfg: Config, tournament: aiosqlite.Row) -> str:
-    return (
-        f"🏆 <b>Турнир начался!</b> До {format_ends(cfg, tournament['ends_at'])}.\n\n"
-        f"{rules_text(cfg)}\n\n<b>Призы:</b>\n{prizes_text(cfg)}\n\n"
-        "Ставьте кнопками под карточкой игры (выберите «🏆 Турнир») или командой "
-        "<code>/tbet 209 ♥ 50</code>. Таблица: /tournament"
-    )
+    return t("tour_start", ends=format_ends(cfg, tournament["ends_at"]), rules=rules_text(cfg), prizes=prizes_text(cfg))
 
 
 def results_text(cfg: Config, top: list[aiosqlite.Row]) -> str:
     if not top:
-        return "🏁 <b>Турнир окончен.</b> В этот раз никто не выполнил условия для приза."
-    lines = ["🏁 <b>Турнир окончен!</b>\n"]
+        return t("tour_over_none")
+    lines = [t("tour_over")]
     for i, e in enumerate(top):
         lines.append(f"{place_mark(i)} {escape(e['name'])} — {e['balance']} · {escape(cfg.tournament_prizes[i])}")
-    lines.append("\nПоздравляем! Призы отправит администратор.")
+    lines.append(t("tour_over_footer"))
     return "\n".join(lines)
 
 
@@ -116,7 +108,7 @@ def admin_report(cfg: Config, top: list[aiosqlite.Row]) -> str:
 async def join_keyboard(bot: Bot) -> InlineKeyboardMarkup:
     me = await bot.me()
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="▶️ Начать играть", url=f"https://t.me/{me.username}?start=join")
+        InlineKeyboardButton(text=t("btn_join"), url=f"https://t.me/{me.username}?start=join")
     ]])
 
 

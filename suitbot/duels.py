@@ -21,15 +21,12 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
+from . import i18n
+from .i18n import t
 from .parser import SUITS, GameResult, suit_emoji
 
 log = logging.getLogger(__name__)
 
-HOW_TO = (
-    "Ответьте на сообщение соперника командой <code>/duel 500</code> — бот вызовет его на дуэль. "
-    "Число игр можно указать сразу: <code>/duel 500 3</code>, или выбрать кнопками в вызове. "
-    "Без ответа вызов открытый: принять может любой."
-)
 
 
 async def enabled(cfg: Config, db: DB) -> bool:
@@ -37,6 +34,8 @@ async def enabled(cfg: Config, db: DB) -> bool:
 
 
 def games_label(n: int) -> str:
+    if i18n.LANG == "uz":
+        return f"{n} ta o'yin"
     if n % 10 == 1 and n % 100 != 11:
         return f"{n} игра"
     if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
@@ -77,12 +76,9 @@ async def render(cfg: Config, db: DB, duel: aiosqlite.Row) -> tuple[str, InlineK
     c, o = _name(duel["challenger_name"]), _name(duel["opponent_name"]) if duel["opponent_id"] else None
     stake = duel["stake"]
     if duel["status"] in ("pending", "declined", "expired"):
-        text = (
-            f"⚔️ <b>{c}</b> вызывает <b>{o or 'любого желающего'}</b> на дуэль!\n"
-            f"Ставка {stake} фишек · {games_label(duel['games_total'])} · угадываем масть игрока"
-        )
+        text = t("duel_challenge", c=c, o=o or t("duel_anyone"), stake=stake, games=games_label(duel["games_total"]))
         if duel["status"] == "pending":
-            text += f"\n⏳ Вызов действует {cfg.duel_accept_minutes} мин. Число игр выбирает {c}."
+            text += t("duel_pending", minutes=cfg.duel_accept_minutes, c=c)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(
@@ -93,18 +89,18 @@ async def render(cfg: Config, db: DB, duel: aiosqlite.Row) -> tuple[str, InlineK
                 ],
                 [
                     # Число игр в данных кнопки: если его сменили в последний момент, принятие не пройдёт.
-                    InlineKeyboardButton(text="⚔️ Принять", callback_data=f"duel:acc:{duel['id']}:{duel['games_total']}"),
-                    InlineKeyboardButton(text="Отказаться", callback_data=f"duel:dec:{duel['id']}"),
+                    InlineKeyboardButton(text=t("duel_btn_accept"), callback_data=f"duel:acc:{duel['id']}:{duel['games_total']}"),
+                    InlineKeyboardButton(text=t("duel_btn_decline"), callback_data=f"duel:dec:{duel['id']}"),
                 ],
             ])
             return text, kb
-        return text + ("\n❌ Вызов отклонён." if duel["status"] == "declined" else "\n⌛ Вызов никто не принял."), None
+        return text + (t("duel_declined") if duel["status"] == "declined" else t("duel_expired")), None
 
     picks = await db.duel_picks(duel["id"])
     by_game = {(p["user_id"], p["game"]): p for p in picks}
     settled = await db.duel_settled_games(duel["id"])
     sc, so = _scores(duel, picks)
-    lines = [f"⚔️ <b>{c} vs {o}</b> · ставка {stake} · счёт <b>{sc} : {so}</b>"]
+    lines = [t("duel_board", c=c, o=o, stake=stake, sc=sc, so=so)]
 
     def shown(uid: int, game: int, with_hit: bool) -> str:
         pick = by_game.get((uid, game))
@@ -118,21 +114,21 @@ async def render(cfg: Config, db: DB, duel: aiosqlite.Row) -> tuple[str, InlineK
         if game in settled:
             lines.append(f"#N{game}: {c} {shown(cid, game, True)} · {o} {shown(oid, game, True)}")
         elif await _seen(db, duel, game):
-            lines.append(f"#N{game}: игра идёт — {c} {shown(cid, game, False)} · {o} {shown(oid, game, False)}")
+            lines.append(t("duel_live", game=game, c=c, cp=shown(cid, game, False), o=o, op=shown(oid, game, False)))
         elif game == current:
-            mark = lambda uid: "✅ выбрал" if (uid, game) in by_game else "⏳ думает"  # noqa: E731
+            mark = lambda uid: t("duel_picked") if (uid, game) in by_game else t("duel_thinking")  # noqa: E731
             lines.append(f"<b>#N{game}:</b> {c} {mark(cid)} · {o} {mark(oid)}")
     left = duel["games_total"] - len(settled)
 
     if duel["status"] == "finished":
         if duel["winner_id"] is None:
-            lines.append(f"\n🤝 <b>Ничья {sc} : {so}</b> — ставки возвращены.")
+            lines.append(t("duel_draw", sc=sc, so=so))
         else:
             winner = c if duel["winner_id"] == duel["challenger_id"] else o
-            lines.append(f"\n🏆 <b>{winner} победил {max(sc, so)} : {min(sc, so)}</b> и забирает {stake * 2} фишек!")
+            lines.append(t("duel_won", winner=winner, a=max(sc, so), b=min(sc, so), pot=stake * 2))
         return "\n".join(lines), None
 
-    lines.append(f"\nОсталось игр: {left}. Выбор соперника скрыт до начала игры.")
+    lines.append(t("duel_left", left=left))
     kb = None
     if current is not None:
         kb = InlineKeyboardMarkup(inline_keyboard=[[
@@ -159,10 +155,10 @@ async def _finish(cfg: Config, db: DB, bot: Bot, duel: aiosqlite.Row) -> None:
         return
     await refresh(cfg, db, bot, duel["id"])
     if winner is None:
-        text = f"🤝 Дуэль {_name(duel['challenger_name'])} vs {_name(duel['opponent_name'])}: ничья {sc} : {so}."
+        text = t("duel_result_draw", c=_name(duel["challenger_name"]), o=_name(duel["opponent_name"]), sc=sc, so=so)
     else:
         name = duel["challenger_name"] if winner == duel["challenger_id"] else duel["opponent_name"]
-        text = f"🏆 <b>{_name(name)}</b> побеждает в дуэли {max(sc, so)} : {min(sc, so)} и забирает {duel['stake'] * 2} фишек!"
+        text = t("duel_result_won", name=_name(name), a=max(sc, so), b=min(sc, so), pot=duel["stake"] * 2)
     try:
         await bot.send_message(duel["chat_id"], text, reply_to_message_id=duel["message_id"])
     except Exception:
@@ -208,10 +204,10 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
     @router.message(Command("duel"))
     async def cmd_duel(message: Message, command: CommandObject, bot: Bot) -> None:
         if not await enabled(cfg, db):
-            await message.reply("Дуэли сейчас выключены.")
+            await message.reply(t("duel_off"))
             return
         if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-            await message.reply("Дуэли проходят в общем чате. " + HOW_TO)
+            await message.reply(t("duel_in_chat") + t("duel_how"))
             return
         user = await ensure_user(message.from_user)
         if not await subs.is_subscribed(bot, user["id"]):
@@ -220,22 +216,21 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             return
         args = (command.args or "").split()
         if not args or not all(a.isdigit() for a in args) or len(args) > 2:
-            await message.reply(HOW_TO)
+            await message.reply(t("duel_how"))
             return
         stake = int(args[0])
         games = int(args[1]) if len(args) == 2 else cfg.duel_games
         if games not in cfg.duel_game_options:
-            options = ", ".join(map(str, cfg.duel_game_options))
-            await message.reply(f"Число игр в дуэли: {options}.")
+            await message.reply(t("duel_games_allowed", options=", ".join(map(str, cfg.duel_game_options))))
             return
         if not cfg.duel_min_stake <= stake <= cfg.duel_max_stake:
-            await message.reply(f"Ставка в дуэли — от {cfg.duel_min_stake} до {cfg.duel_max_stake} фишек.")
+            await message.reply(t("duel_stake_limits", min=cfg.duel_min_stake, max=cfg.duel_max_stake))
             return
         if user["balance"] < stake:
-            await message.reply(f"Недостаточно фишек: на балансе {user['balance']}.")
+            await message.reply(t("duel_no_chips", balance=user["balance"]))
             return
         if await db.user_busy_in_duel(user["id"]):
-            await message.reply("У вас уже есть вызов или идёт дуэль — дождитесь её конца.")
+            await message.reply(t("duel_busy_self"))
             return
 
         opponent = None
@@ -243,7 +238,7 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         if target and not target.is_bot and target.id != user["id"]:
             opponent = await ensure_user(target)
             if await db.user_busy_in_duel(opponent["id"]):
-                await message.reply(f"{_name(opponent['name'])} уже участвует в дуэли.")
+                await message.reply(t("duel_busy_other", name=_name(opponent["name"])))
                 return
 
         duel_id = await db.create_duel(
@@ -255,21 +250,20 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
 
     @router.callback_query(F.data == "duel:help")
     async def on_help(query: CallbackQuery) -> None:
-        await query.answer("Чтобы вызвать соперника, ответьте на его сообщение: /duel 500. "
-                           "Без ответа — открытый вызов для всех.", show_alert=True)
+        await query.answer(t("duel_help_alert"), show_alert=True)
 
     @router.callback_query(F.data.startswith("duel:len:"))
     async def on_length(query: CallbackQuery, bot: Bot) -> None:
         _, _, duel_id, games = query.data.split(":")
         duel = await db.get_duel(int(duel_id))
         if not duel or duel["status"] != "pending":
-            await query.answer("Вызов уже неактуален.", show_alert=True)
+            await query.answer(t("duel_stale"), show_alert=True)
             return
         if query.from_user.id != duel["challenger_id"]:
-            await query.answer("Число игр выбирает тот, кто вызвал.", show_alert=True)
+            await query.answer(t("duel_len_owner"), show_alert=True)
             return
         if int(games) in cfg.duel_game_options and await db.set_duel_games(duel["id"], int(games)):
-            await query.answer(f"Дуэль: {games_label(int(games))}")
+            await query.answer(t("duel_len_set", games=games_label(int(games))))
             await refresh(cfg, db, bot, duel["id"])
         else:
             await query.answer()
@@ -279,37 +273,36 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         parts = query.data.split(":")
         duel = await db.get_duel(int(parts[2]))
         if not duel or duel["status"] != "pending":
-            await query.answer("Вызов уже неактуален.", show_alert=True)
+            await query.answer(t("duel_stale"), show_alert=True)
             return
         if len(parts) > 3 and int(parts[3]) != duel["games_total"]:
-            await query.answer(f"Условия изменились: теперь игр {duel['games_total']}. Посмотрите и нажмите ещё раз.",
-                               show_alert=True)
+            await query.answer(t("duel_changed", games=games_label(duel["games_total"])), show_alert=True)
             await refresh(cfg, db, bot, duel["id"])
             return
         if not await enabled(cfg, db):
-            await query.answer("Дуэли сейчас выключены.", show_alert=True)
+            await query.answer(t("duel_off"), show_alert=True)
             return
         user = await ensure_user(query.from_user)
         if user["id"] == duel["challenger_id"]:
-            await query.answer("Нельзя принять свой же вызов.", show_alert=True)
+            await query.answer(t("duel_own"), show_alert=True)
             return
         if duel["opponent_id"] and user["id"] != duel["opponent_id"]:
-            await query.answer("Этот вызов не вам.", show_alert=True)
+            await query.answer(t("duel_not_you"), show_alert=True)
             return
         if not await subs.is_subscribed(bot, user["id"]):
             await query.answer(subs.alert(), show_alert=True)
             return
         if not duel["opponent_id"] and await db.user_busy_in_duel(user["id"]):
-            await query.answer("У вас уже есть вызов или идёт дуэль.", show_alert=True)
+            await query.answer(t("duel_busy_alert"), show_alert=True)
             return
         last = await db.last_game()
         if last is None:
-            await query.answer("Подождите первый пост канала.", show_alert=True)
+            await query.answer(t("duel_wait_post"), show_alert=True)
             return
         if not await db.accept_duel(duel["id"], user["id"], last + 1):
-            await query.answer(f"Не хватает фишек: нужно {duel['stake']} у обоих.", show_alert=True)
+            await query.answer(t("duel_no_funds", stake=duel["stake"]), show_alert=True)
             return
-        await query.answer("⚔️ Дуэль началась! Выбирайте масть на ближайшую игру.")
+        await query.answer(t("duel_started"))
         await refresh(cfg, db, bot, duel["id"])
 
     @router.callback_query(F.data.startswith("duel:dec:"))
@@ -319,10 +312,10 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             await query.answer()
             return
         if query.from_user.id not in (duel["challenger_id"], duel["opponent_id"]):
-            await query.answer("Отказаться может только тот, кого вызвали.", show_alert=True)
+            await query.answer(t("duel_decline_who"), show_alert=True)
             return
         await db.set_duel_status(duel["id"], "declined", only_from="pending")
-        await query.answer("Вызов отменён.")
+        await query.answer(t("duel_cancelled"))
         await refresh(cfg, db, bot, duel["id"])
 
     @router.callback_query(F.data.startswith("duel:p:"))
@@ -330,17 +323,17 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         _, _, duel_id, game, suit = query.data.split(":", 4)
         duel = await db.get_duel(int(duel_id))
         if not duel or duel["status"] != "active":
-            await query.answer("Дуэль уже закончилась.", show_alert=True)
+            await query.answer(t("duel_over"), show_alert=True)
             return
         if query.from_user.id not in (duel["challenger_id"], duel["opponent_id"]):
-            await query.answer("Это чужая дуэль — вызовите кого-нибудь сами: /duel 500", show_alert=True)
+            await query.answer(t("duel_foreign"), show_alert=True)
             return
         if await _seen(db, duel, int(game)):
-            await query.answer(f"Игра #N{game} уже началась — выбирайте на следующую.", show_alert=True)
+            await query.answer(t("duel_pick_late", game=game), show_alert=True)
             await refresh(cfg, db, bot, duel["id"])
             return
         await db.set_duel_pick(duel["id"], int(game), query.from_user.id, suit)
-        await query.answer(f"Вы выбрали {suit_emoji(suit)} на #N{game} — соперник не видит до начала игры.")
+        await query.answer(t("duel_pick_ok", suit=suit_emoji(suit), game=game))
         await refresh(cfg, db, bot, duel["id"])
 
     return router

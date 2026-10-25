@@ -7,6 +7,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .config import Config
+from .i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -48,10 +49,10 @@ class SubscriptionChecker:
 
     def prompt(self) -> tuple[str, InlineKeyboardMarkup]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Подписаться на канал", url=self.channel_url)],
-            [InlineKeyboardButton(text="✅ Я подписался", callback_data="sub:check")],
+            [InlineKeyboardButton(text=t("sub_btn"), url=self.channel_url)],
+            [InlineKeyboardButton(text=t("sub_done_btn"), callback_data="sub:check")],
         ])
-        return "Чтобы играть, подпишитесь на канал со статистикой — там выходят все игры.", kb
+        return t("sub_prompt"), kb
 
     def alert(self) -> str:
-        return f"Чтобы играть, подпишитесь на канал {self.cfg.required_channel} и нажмите ещё раз."
+        return t("sub_alert", channel=self.cfg.required_channel)

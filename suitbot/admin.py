@@ -9,7 +9,8 @@ from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from . import cards, duels
+from . import cards, duels, i18n
+from .i18n import t
 from . import tournament as tour
 from .config import Config
 from .db import DB
@@ -22,22 +23,10 @@ WALLET_NAMES = {"main": "обычных", "tour": "турнирных"}
 
 
 def invite_text(cfg: Config, tournament=None) -> str:
-    text = (
-        "🎴 <b>Прогнозы на масти — игра в чате</b>\n\n"
-        "Угадывайте масть в картах игрока и победителя раздачи, копите фишки и поднимайтесь в топ.\n\n"
-        "<b>Как начать:</b>\n"
-        f"1. Нажмите «Начать играть» и затем «Старт» — сразу получите {cfg.start_balance} фишек "
-        "и кабинет с кнопками: баланс, бонус, рейтинг, турнир.\n"
-        "2. После каждой игры здесь выходит карточка следующей игры — выберите сумму и масть. "
-        "Ставки принимаются, пока идёт предыдущая игра.\n"
-        f"3. Забирайте бонус {cfg.bonus_amount} фишек раз в {cfg.bonus_period_days} дн. и следите за рейтингом 📊.\n"
-    )
+    text = t("invite", start=cfg.start_balance, bonus=cfg.bonus_amount, days=cfg.bonus_period_days)
     if tournament:
-        text += (
-            f"\n🏆 <b>Идёт турнир</b> до {tour.format_ends(cfg, tournament['ends_at'])}. Призы:\n"
-            f"{tour.prizes_text(cfg)}\nУчастие бесплатное: /tournament\n"
-        )
-    return text + "\nФишки — игровая валюта, их нельзя вывести."
+        text += t("invite_tour", ends=tour.format_ends(cfg, tournament["ends_at"]), prizes=tour.prizes_text(cfg))
+    return text + t("invite_footer")
 
 
 async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarkup]:
@@ -105,6 +94,9 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
     ])
     if duels_on:
         rows.append([InlineKeyboardButton(text="📢 Анонс дуэлей в чат", callback_data="adm:duelnews")])
+    other = "uz" if i18n.LANG == "ru" else "ru"
+    lines.append(f"Язык для игроков: {i18n.LANGS[i18n.LANG]}")
+    rows.append([InlineKeyboardButton(text=f"🌐 Язык → {i18n.LANGS[other]}", callback_data=f"adm:lang:{other}")])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:refresh")])
@@ -112,18 +104,8 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
 
 
 def duel_news_text(cfg: Config) -> str:
-    return (
-        "⚔️ <b>Новинка: дуэли!</b>\n\n"
-        "Вызовите любого игрока чата один на один:\n"
-        f"1. Ответьте на его сообщение командой <code>/duel 500</code> (ставка от {cfg.duel_min_stake} "
-        f"до {cfg.duel_max_stake} фишек). Без ответа — открытый вызов, принять может любой.\n"
-        f"2. Соперник жмёт «⚔️ Принять» — у обоих замораживается ставка.\n"
-        f"3. Вызывающий выбирает длину: {', '.join(map(str, cfg.duel_game_options))} игр. Каждую игру "
-        "оба выбирают масть игрока кнопками под дуэлью. "
-        "Выбор соперника скрыт до начала игры.\n"
-        "4. Кто угадал больше — забирает обе ставки. Ничья — ставки возвращаются.\n\n"
-        "Дуэли — на обычных фишках, турнир они не трогают. Удачи! 🍀"
-    )
+    return t("duel_news", min=cfg.duel_min_stake, max=cfg.duel_max_stake,
+             options=", ".join(map(str, cfg.duel_game_options)))
 
 
 async def gift_menu(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]:
@@ -158,8 +140,7 @@ async def give_all(cfg: Config, db: DB, bot: Bot, wallet: str, amount: int, anno
     if announce:
         main_chat = await db.get_state("main_chat")
         if main_chat:
-            text = f"🎁 <b>Подарок от админа!</b> Всем {'участникам турнира ' if wallet == 'tour' else ''}" \
-                   f"+{amount} {WALLET_NAMES[wallet]} фишек. Удачи в прогнозах!"
+            text = t("gift_tour" if wallet == "tour" else "gift_all", amount=amount)
             try:
                 await bot.send_message(int(main_chat), text)
             except Exception:
@@ -216,7 +197,11 @@ def build_router(cfg: Config, db: DB) -> Router:
             await query.answer()
             await query.message.edit_text(text, reply_markup=kb)
             return
-        if action == "duels":
+        if action == "lang":
+            await db.set_state("lang", parts[2])
+            i18n.set_lang(parts[2])
+            note = f"Язык для игроков: {i18n.LANGS[i18n.LANG]}. Новые карточки и сообщения — на нём."
+        elif action == "duels":
             on = await duels.enabled(cfg, db)
             await db.set_state("duels_enabled", "0" if on else "1")
             note = "Дуэли выключены." if on else "Дуэли включены."

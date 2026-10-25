@@ -19,6 +19,7 @@ from . import betting, duels, rating
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
+from .i18n import t
 from .parser import SUITS, suit_emoji
 
 log = logging.getLogger(__name__)
@@ -37,18 +38,14 @@ def frequency_label(every: int) -> str:
 
 
 def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
-    status = "ставки закрыты" if closed else "ставки открыты"
     picks = " · ".join(f"{suit_emoji(s)} {counts.get(s, 0)}" for s in SUITS)
-    sides = f"Игрок {counts.get('P', 0)} · Банкир {counts.get('B', 0)} · Ничья {counts.get('T', 0)}"
     lines = [
-        f"🎴 <b>Игра #N{game}</b> — {status}",
-        f"Масть в картах игрока ×{cfg.payout_suit:g} · игрок/банкир ×{cfg.payout_player:g} · ничья ×{cfg.payout_tie:g}",
-        f"Ставок: {picks} | {sides}",
+        t("card_title", game=game, status=t("card_closed") if closed else t("card_open")),
+        t("card_odds", suit=f"{cfg.payout_suit:g}", p=f"{cfg.payout_player:g}", t=f"{cfg.payout_tie:g}"),
+        t("card_counts", picks=picks, P=counts.get("P", 0), B=counts.get("B", 0), T=counts.get("T", 0)),
     ]
     if not closed:
-        lines.append(
-            "Выберите сумму" + (" и кошелёк" if tournament_on else "") + " (запоминается), затем масть или исход."
-        )
+        lines.append(t("card_hint_tour") if tournament_on else t("card_hint"))
     return "\n".join(lines)
 
 
@@ -56,21 +53,21 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duel
     rows = [
         [InlineKeyboardButton(text=suit_emoji(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
         [
-            InlineKeyboardButton(text=f"{name.capitalize()}", callback_data=f"b:{game}:side:{code}")
-            for code, name in betting.SIDE_NAMES.items()
+            InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
+            for code in betting.SIDES
         ],
         [InlineKeyboardButton(text=f"💰 {s}", callback_data=f"st:{s}") for s in STAKES],
     ]
     if tournament_on:
         rows.append([
-            InlineKeyboardButton(text="🏆 Турнир", callback_data="w:tour"),
-            InlineKeyboardButton(text="Обычные фишки", callback_data="w:main"),
+            InlineKeyboardButton(text=t("card_btn_tour"), callback_data="w:tour"),
+            InlineKeyboardButton(text=t("card_btn_main"), callback_data="w:main"),
         ])
-    last_row = [InlineKeyboardButton(text="📊 Рейтинг", callback_data="rate")]
+    last_row = [InlineKeyboardButton(text=t("card_btn_rating"), callback_data="rate")]
     if duels_on:
-        last_row.append(InlineKeyboardButton(text="⚔️ Дуэль", callback_data="duel:help"))
+        last_row.append(InlineKeyboardButton(text=t("card_btn_duel"), callback_data="duel:help"))
     if bot_username:
-        last_row.append(InlineKeyboardButton(text="👤 Кабинет", url=f"https://t.me/{bot_username}?start=menu"))
+        last_row.append(InlineKeyboardButton(text=t("card_btn_cabinet"), url=f"https://t.me/{bot_username}?start=menu"))
     rows.append(last_row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -157,14 +154,14 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         await ensure_user(query.from_user)
         stake = int(query.data.split(":")[1])
         await db.set_pref(query.from_user.id, stake=stake)
-        await query.answer(f"Сумма ставки: {stake}")
+        await query.answer(t("stake_set", stake=stake))
 
     @router.callback_query(F.data.startswith("w:"))
     async def on_wallet(query: CallbackQuery) -> None:
         await ensure_user(query.from_user)
         wallet = query.data.split(":")[1]
         await db.set_pref(query.from_user.id, wallet=wallet)
-        await query.answer("Ставлю турнирными фишками 🏆" if wallet == "tour" else "Ставлю обычными фишками")
+        await query.answer(t("wallet_tour_set") if wallet == "tour" else t("wallet_main_set"))
 
     @router.callback_query(F.data.startswith("b:"))
     async def on_bet(query: CallbackQuery, bot: Bot) -> None:
@@ -185,11 +182,11 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
                 pending[key] = now + cfg.bet_confirm_seconds
                 coef = cfg.payout(kind, pick)
                 stake = user["pref_stake"]
-                button = suit_emoji(pick) if kind == "suit" else betting.SIDE_NAMES[pick].capitalize()
+                button = suit_emoji(pick) if kind == "suit" else betting.side_name(pick).capitalize()
                 await query.answer(
-                    f"Ставка на #N{game}\n{betting.describe_pick(kind, pick)} · {stake} "
-                    f"{'турнирных ' if tournament_bet else ''}фишек · ×{coef:g} → выигрыш {int(stake * coef)}\n\n"
-                    f"Нажмите «{button}» ещё раз в течение {cfg.bet_confirm_seconds} сек, чтобы подтвердить.",
+                    t("bet_confirm", game=game, pick=betting.describe_pick(kind, pick), amount=stake,
+                      wallet=t("wallet_tour_word") if tournament_bet else "", coef=f"{coef:g}",
+                      win=int(stake * coef), button=button, seconds=cfg.bet_confirm_seconds),
                     show_alert=True,
                 )
                 return

@@ -78,6 +78,9 @@ class Config:
     # Куда объявлять начало и итоги, кроме чата, выбранного командой /setchat.
     tournament_chats: set[int] = field(default_factory=lambda: _ids(os.getenv("TOURNAMENT_CHATS", "")))
 
+    # Язык для игроков по умолчанию (ru | uz); меняется в /admin.
+    lang: str = os.getenv("BOT_LANG", "ru")
+
     # Подтверждение ставки с карточки вторым нажатием (вкл/выкл ещё и в /admin).
     bet_confirm: bool = os.getenv("BET_CONFIRM", "1") == "1"
     bet_confirm_seconds: int = int(os.getenv("BET_CONFIRM_SECONDS", "15"))

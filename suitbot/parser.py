@@ -23,12 +23,15 @@ SUIT_ALIASES = {
     "♣": "♣", "крести": "♣", "трефы": "♣", "треф": "♣", "к": "♣",
     "♥": "♥", "черви": "♥", "червы": "♥", "черв": "♥", "ч": "♥",
     "♦": "♦", "буби": "♦", "бубны": "♦", "бубен": "♦", "б": "♦",
+    # узбекские названия мастей
+    "qarg'a": "♠", "pika": "♠", "chillak": "♣", "chirvo": "♥", "yurak": "♥", "g'isht": "♦", "xishtak": "♦",
 }
 
 SIDE_ALIASES = {
     "игрок": "P", "и": "P", "p": "P", "player": "P",
     "банкир": "B", "банк": "B", "b": "B", "banker": "B",
     "ничья": "T", "н": "T", "t": "T", "tie": "T",
+    "o'yinchi": "P", "oyinchi": "P", "bankir": "B", "durrang": "T",
 }
 
 IN_PROGRESS_MARKERS = ("⏰", "⏳", "▶")
@@ -101,7 +104,10 @@ def parse_game_number(text: str | None) -> int | None:
 
 def parse_pick(word: str) -> tuple[str, str] | None:
     """Возвращает (тип ставки, выбор): ("suit", "♥") или ("side", "P")."""
+    # В узбекской латинице апостроф пишут по-разному: o‘yinchi, oʻyinchi, o’yinchi.
     word = _clean(word).strip().lower()
+    for apostrophe in "‘ʻ’`ʼ":
+        word = word.replace(apostrophe, "'")
     if word in SUIT_ALIASES:
         return "suit", SUIT_ALIASES[word]
     if word in SIDE_ALIASES:

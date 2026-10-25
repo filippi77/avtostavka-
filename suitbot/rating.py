@@ -4,6 +4,7 @@ from html import escape
 
 from .config import Config
 from .db import DB
+from .i18n import t
 from .tournament import place_mark
 
 POPUP_LIMIT = 200  # Telegram обрезает всплывающее окно после 200 символов
@@ -20,26 +21,26 @@ async def _rows(cfg: Config, db: DB, user_id: int, limit: int = 10):
         standings = await db.standings(current["id"])
         rows = [(e["name"], e["balance"]) for e in standings[:limit]]
         mine = next(((i + 1, e["balance"]) for i, e in enumerate(standings) if e["user_id"] == user_id), (None, None))
-        return "🏆 Турнир", rows, *mine
+        return t("rating_title_tour"), rows, *mine
     top = await db.top(limit)
     user = await db.get_user(user_id)
     rank = await db.user_rank(user_id) if user else None
-    return "📊 Рейтинг", [(r["name"], r["balance"]) for r in top], rank, user["balance"] if user else None
+    return t("rating_title"), [(r["name"], r["balance"]) for r in top], rank, user["balance"] if user else None
 
 
 async def popup_text(cfg: Config, db: DB, user_id: int) -> str:
     title, rows, place, balance = await _rows(cfg, db, user_id)
     if not rows:
-        return f"{title}: пока никого нет."
+        return t("rating_empty", title=title)
     if place:
-        footer = f"Вы: {place} место · {balance}"
+        footer = t("rating_me", place=place, balance=balance)
     elif title.startswith("🏆"):
-        footer = "Вы не в турнире: /tournament"
+        footer = t("rating_not_in_tour")
     else:
-        footer = "Сделайте первую ставку, чтобы попасть в рейтинг"
+        footer = t("rating_first_bet")
     lines = [f"{i + 1}. {_short(name)} {bal}" for i, (name, bal) in enumerate(rows)]
     while lines:
-        text = "\n".join([f"{title} · топ {len(lines)}", *lines, footer])
+        text = "\n".join([t("rating_top", title=title, n=len(lines)), *lines, footer])
         if len(text) <= POPUP_LIMIT:
             return text
         lines.pop()
@@ -49,11 +50,11 @@ async def popup_text(cfg: Config, db: DB, user_id: int) -> str:
 async def full_text(cfg: Config, db: DB, user_id: int) -> str:
     title, rows, place, balance = await _rows(cfg, db, user_id)
     if not rows:
-        return f"{title}: пока никого нет."
-    lines = [f"<b>{title} · топ {len(rows)}</b>"]
+        return t("rating_empty", title=title)
+    lines = [f"<b>{t('rating_top', title=title, n=len(rows))}</b>"]
     lines += [f"{place_mark(i)} {escape(name)} — {bal}" for i, (name, bal) in enumerate(rows)]
     if place:
-        lines.append(f"\nВы: <b>{place} место</b> · {balance} фишек")
+        lines.append(t("rating_me_full", place=place, balance=balance))
     elif title.startswith("🏆"):
-        lines.append("\nВы ещё не в турнире — вступайте: /tournament")
+        lines.append(t("rating_not_in_tour_full"))
     return "\n".join(lines)
