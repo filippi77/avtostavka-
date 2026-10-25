@@ -154,3 +154,24 @@ def test_migration_adds_last_spin(tmp_path):
             await db.close()
 
     asyncio.run(go())
+
+
+def test_games_label():
+    assert [duels.games_label(n) for n in (1, 3, 5, 10, 21)] == ["1 игра", "3 игры", "5 игр", "10 игр", "21 игра"]
+
+
+def test_challenger_changes_length_only_while_pending(tmp_path):
+    async def body(db):
+        await db.ensure_user(1, "Руслан", 500)
+        await db.ensure_user(2, "Алсу", 500)
+        duel_id = await db.create_duel(-100, 1, 2, 100, 10)
+        text, kb = await duels.render(DCFG, db, await db.get_duel(duel_id))
+        assert "10 игр" in text and kb.inline_keyboard[0][3].text == "✅ 10 игр"
+        assert kb.inline_keyboard[1][0].callback_data == f"duel:acc:{duel_id}:10"
+        assert await db.set_duel_games(duel_id, 3)
+        text, kb = await duels.render(DCFG, db, await db.get_duel(duel_id))
+        assert "3 игры" in text and kb.inline_keyboard[1][0].callback_data == f"duel:acc:{duel_id}:3"
+        assert await db.accept_duel(duel_id, 2, 208)
+        assert not await db.set_duel_games(duel_id, 1)  # после принятия не меняется
+
+    run_with_db(tmp_path, body)

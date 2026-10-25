@@ -130,7 +130,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
 
     def help_text(duels_on: bool = True) -> str:
         duel_line = (
-            f"⚔️ Дуэль: ответьте сопернику в чате <code>/duel 500</code> — {cfg.duel_games} игр, "
+            f"⚔️ Дуэль: ответьте сопернику в чате <code>/duel 500</code> — на {', '.join(map(str, cfg.duel_game_options))} игр, "
             "кто угадал больше масть игрока, забирает обе ставки.\n"
         ) if duels_on else ""
         period = "раз в неделю" if cfg.bonus_period_days == 7 else f"раз в {cfg.bonus_period_days} дн."

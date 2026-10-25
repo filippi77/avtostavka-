@@ -84,6 +84,8 @@ class Config:
 
     # Дуэли: включаются и выключаются в /admin, здесь — значение по умолчанию.
     duels_enabled: bool = os.getenv("DUELS_ENABLED", "1") == "1"
+    # Сколько игр может длиться дуэль (выбирает вызывающий) и длина по умолчанию.
+    duel_game_options: tuple[int, ...] = tuple(int(x) for x in os.getenv("DUEL_GAME_OPTIONS", "1,3,5,10").split(","))
     duel_games: int = int(os.getenv("DUEL_GAMES", "10"))
     duel_min_stake: int = int(os.getenv("DUEL_MIN_STAKE", "50"))
     duel_max_stake: int = int(os.getenv("DUEL_MAX_STAKE", "10000"))

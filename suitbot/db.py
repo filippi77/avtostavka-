@@ -525,6 +525,13 @@ class DB:
         await self.conn.commit()
         return True
 
+    async def set_duel_games(self, duel_id: int, games_total: int) -> bool:
+        cur = await self.conn.execute(
+            "UPDATE duels SET games_total = ? WHERE id = ? AND status = 'pending'", (games_total, duel_id)
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount)
+
     async def set_duel_status(self, duel_id: int, status: str, only_from: str) -> bool:
         cur = await self.conn.execute(
             "UPDATE duels SET status = ? WHERE id = ? AND status = ?", (status, duel_id, only_from)

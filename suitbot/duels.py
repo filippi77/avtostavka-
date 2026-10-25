@@ -27,12 +27,21 @@ log = logging.getLogger(__name__)
 
 HOW_TO = (
     "Ответьте на сообщение соперника командой <code>/duel 500</code> — бот вызовет его на дуэль. "
+    "Число игр можно указать сразу: <code>/duel 500 3</code>, или выбрать кнопками в вызове. "
     "Без ответа вызов открытый: принять может любой."
 )
 
 
 async def enabled(cfg: Config, db: DB) -> bool:
     return await db.get_state("duels_enabled", "1" if cfg.duels_enabled else "0") == "1"
+
+
+def games_label(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} игра"
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return f"{n} игры"
+    return f"{n} игр"
 
 
 def _name(name: str | None, n: int = 14) -> str:
@@ -70,14 +79,24 @@ async def render(cfg: Config, db: DB, duel: aiosqlite.Row) -> tuple[str, InlineK
     if duel["status"] in ("pending", "declined", "expired"):
         text = (
             f"⚔️ <b>{c}</b> вызывает <b>{o or 'любого желающего'}</b> на дуэль!\n"
-            f"Ставка {stake} фишек · игр: {duel['games_total']} · угадываем масть игрока"
+            f"Ставка {stake} фишек · {games_label(duel['games_total'])} · угадываем масть игрока"
         )
         if duel["status"] == "pending":
-            text += f"\n⏳ Вызов действует {cfg.duel_accept_minutes} мин"
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="⚔️ Принять", callback_data=f"duel:acc:{duel['id']}"),
-                InlineKeyboardButton(text="Отказаться", callback_data=f"duel:dec:{duel['id']}"),
-            ]])
+            text += f"\n⏳ Вызов действует {cfg.duel_accept_minutes} мин. Число игр выбирает {c}."
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=("✅ " if n == duel["games_total"] else "") + games_label(n),
+                        callback_data=f"duel:len:{duel['id']}:{n}",
+                    )
+                    for n in cfg.duel_game_options
+                ],
+                [
+                    # Число игр в данных кнопки: если его сменили в последний момент, принятие не пройдёт.
+                    InlineKeyboardButton(text="⚔️ Принять", callback_data=f"duel:acc:{duel['id']}:{duel['games_total']}"),
+                    InlineKeyboardButton(text="Отказаться", callback_data=f"duel:dec:{duel['id']}"),
+                ],
+            ])
             return text, kb
         return text + ("\n❌ Вызов отклонён." if duel["status"] == "declined" else "\n⌛ Вызов никто не принял."), None
 
@@ -199,11 +218,16 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             text, kb = subs.prompt()
             await message.reply(text, reply_markup=kb)
             return
-        arg = (command.args or "").strip()
-        if not arg.isdigit():
+        args = (command.args or "").split()
+        if not args or not all(a.isdigit() for a in args) or len(args) > 2:
             await message.reply(HOW_TO)
             return
-        stake = int(arg)
+        stake = int(args[0])
+        games = int(args[1]) if len(args) == 2 else cfg.duel_games
+        if games not in cfg.duel_game_options:
+            options = ", ".join(map(str, cfg.duel_game_options))
+            await message.reply(f"Число игр в дуэли: {options}.")
+            return
         if not cfg.duel_min_stake <= stake <= cfg.duel_max_stake:
             await message.reply(f"Ставка в дуэли — от {cfg.duel_min_stake} до {cfg.duel_max_stake} фишек.")
             return
@@ -223,7 +247,7 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
                 return
 
         duel_id = await db.create_duel(
-            message.chat.id, user["id"], opponent["id"] if opponent else None, stake, cfg.duel_games
+            message.chat.id, user["id"], opponent["id"] if opponent else None, stake, games
         )
         text, kb = await render(cfg, db, await db.get_duel(duel_id))
         sent = await message.answer(text, reply_markup=kb)
@@ -234,11 +258,33 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         await query.answer("Чтобы вызвать соперника, ответьте на его сообщение: /duel 500. "
                            "Без ответа — открытый вызов для всех.", show_alert=True)
 
-    @router.callback_query(F.data.startswith("duel:acc:"))
-    async def on_accept(query: CallbackQuery, bot: Bot) -> None:
-        duel = await db.get_duel(int(query.data.split(":")[2]))
+    @router.callback_query(F.data.startswith("duel:len:"))
+    async def on_length(query: CallbackQuery, bot: Bot) -> None:
+        _, _, duel_id, games = query.data.split(":")
+        duel = await db.get_duel(int(duel_id))
         if not duel or duel["status"] != "pending":
             await query.answer("Вызов уже неактуален.", show_alert=True)
+            return
+        if query.from_user.id != duel["challenger_id"]:
+            await query.answer("Число игр выбирает тот, кто вызвал.", show_alert=True)
+            return
+        if int(games) in cfg.duel_game_options and await db.set_duel_games(duel["id"], int(games)):
+            await query.answer(f"Дуэль: {games_label(int(games))}")
+            await refresh(cfg, db, bot, duel["id"])
+        else:
+            await query.answer()
+
+    @router.callback_query(F.data.startswith("duel:acc:"))
+    async def on_accept(query: CallbackQuery, bot: Bot) -> None:
+        parts = query.data.split(":")
+        duel = await db.get_duel(int(parts[2]))
+        if not duel or duel["status"] != "pending":
+            await query.answer("Вызов уже неактуален.", show_alert=True)
+            return
+        if len(parts) > 3 and int(parts[3]) != duel["games_total"]:
+            await query.answer(f"Условия изменились: теперь игр {duel['games_total']}. Посмотрите и нажмите ещё раз.",
+                               show_alert=True)
+            await refresh(cfg, db, bot, duel["id"])
             return
         if not await enabled(cfg, db):
             await query.answer("Дуэли сейчас выключены.", show_alert=True)
