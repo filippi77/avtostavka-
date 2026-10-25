@@ -2427,6 +2427,26 @@ def event_job(item):
   return job
 
 
+def drop_pending(game):
+  """Выключили игру — убираем её ещё не начатые сигналы из очереди и из inbox."""
+  removed = 0
+  with jobs.mutex:
+    for dq in (jobs.urgent, jobs.normal):
+      keep = [j for j in dq if not (j.get("fn") == job_bet and game_of(j.get("sig")) == game)]
+      removed += len(dq) - len(keep)
+      dq.clear()
+      dq.extend(keep)
+  with lock:
+    before = len(state["inbox"])
+    state["inbox"] = [
+        x for x in state["inbox"]
+        if not (x["kind"] == "signal" and game_of(x["payload"]) == game)
+    ]
+    if len(state["inbox"]) != before:
+      save_state()
+  return removed
+
+
 def finish_event(event_id, review=False, retryable=False):
   with lock:
     previous = copy.deepcopy(state)
@@ -2792,6 +2812,10 @@ def job_bet(page, job):
       print(f"⚠️ Ошибка отправки в Telegram: {net_err}")
     return None
 
+  if not game_on(game) or not state["running"]:
+    print(f"⏭ {describe(sig)}: игра выключена или бот на паузе — пропуск")
+    return  # тихо: после выключения игры в очереди могут остаться десятки сигналов
+
   max_age = {"g21": G21_SIGNAL_MAX_AGE, "penalty": PEN_SIGNAL_MAX_AGE}.get(game)
   age = time.time() - float(job.get("received_at") or time.time())
   if max_age and age > max_age:
@@ -2830,6 +2854,9 @@ def job_bet(page, job):
   last_error = None
 
   for attempt in range(1, MAX_RETRIES + 1):
+    if attempt > 1 and (not game_on(game) or not state["running"]):
+      print(f"⏭ {describe(sig)}: игру выключили — повторы прекращены")
+      return
     try:
       if job["dry"]:
         odds = prepare_bet(page, sig, stake)
@@ -3986,10 +4013,12 @@ def on_cb(c):
     g = d[5:]
     with lock:
       state.setdefault("games", {})[g] = not game_on(g)
+      dropped = 0 if game_on(g) else drop_pending(g)
     send(
         f"{GAMES[g]}: {'включён' if game_on(g) else 'выключен'}."
         + ("" if game_on(g) else " Новые сигналы пропускаются, открытые ставки"
            " получат результат.")
+        + (f" Убрано из очереди сигналов: {dropped}." if dropped else "")
     )
   elif d == "pen_repeat":
     with lock:
