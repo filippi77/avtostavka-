@@ -144,6 +144,10 @@ G21_LADDERS = {
 }
 G21_MAX_ODDS_DIFF = 0.25  # КФ на сайте отличается от сигнала больше чем на 25% — не ставим
 G21_FIND_TIMEOUT = 40  # сек ждём, пока игра появится в поиске
+# Сигнал старше этого (например, после перезапуска бота или падения Opera) не ставим:
+# игра/матч уже прошли. Теннис по-прежнему без ограничения (MAX_SIGNAL_AGE).
+G21_SIGNAL_MAX_AGE = 90
+PEN_SIGNAL_MAX_AGE = 4 * 60
 
 GAMES = {"tennis": "🏓 Теннис", "penalty": "⚽ Пенальти", "g21": "🃏 21 очко"}
 MARKETS = ("ТМ", "ТБ", "П1", "П2", "ГОЛД", "РАЗДАЧА")
@@ -2184,7 +2188,7 @@ def _process_21_message(msg, is_edit=False):
   else:
     event_id = ev["event_id"]
   try:
-    enqueue_event(event_id, ev, received_at=time.time())
+    enqueue_event(event_id, ev, received_at=_msg_time(msg))
   except ValueError as e:
     send(f"⚠️ 21 очко: событие отклонено: {html.escape(str(e))}")
 
@@ -2417,7 +2421,7 @@ def execute_job(job, page=None):
     finish_event(job["id"], review=outcome is False)
 
 
-PAGE_RECYCLE_EVERY = 25  # через столько заданий вкладка заменяется новой (память)
+PAGE_RECYCLE_EVERY = 15  # через столько заданий вкладка заменяется новой (память)
 # Бот держит ровно одну вкладку DB Bet: остальные (старые после переподключения,
 # открытые сайтом в новом окне) закрываются. False — закрывать только упавшие.
 CLOSE_EXTRA_TABS = True
@@ -2749,6 +2753,13 @@ def job_bet(page, job):
     except Exception as net_err:
       print(f"⚠️ Ошибка отправки в Telegram: {net_err}")
     return None
+
+  max_age = {"g21": G21_SIGNAL_MAX_AGE, "penalty": PEN_SIGNAL_MAX_AGE}.get(game)
+  age = time.time() - float(job.get("received_at") or time.time())
+  if max_age and age > max_age:
+    send(f"⏭ {html.escape(describe(sig))}: сигнал устарел ({int(age // 60)} мин"
+         f" {int(age % 60)} с) — пропускаю, игра уже прошла")
+    return  # без браузера: после перезапуска старые сигналы не ищем на сайте
 
   if game == "g21":
     stale = g21_stale(sig.get("match_no") or 0)
@@ -3157,6 +3168,14 @@ def parse_pen_post(text):
   return None
 
 
+def _msg_time(msg):
+  """Когда сообщение отправлено в канал (а не когда бот его прочитал)."""
+  stamp = getattr(msg, "date", None)
+  if isinstance(stamp, datetime.datetime):
+    stamp = stamp.timestamp()
+  return float(stamp) if stamp else time.time()
+
+
 def _process_pen_message(msg, is_edit=False):
   ev = parse_pen_post(msg.text or msg.caption or "")
   if ev is None:
@@ -3169,7 +3188,7 @@ def _process_pen_message(msg, is_edit=False):
   else:
     event_id = ev["event_id"]
   try:
-    enqueue_event(event_id, ev, received_at=time.time())
+    enqueue_event(event_id, ev, received_at=_msg_time(msg))
   except ValueError as e:
     send(f"⚠️ Пенальти: событие отклонено: {html.escape(str(e))}")
 
