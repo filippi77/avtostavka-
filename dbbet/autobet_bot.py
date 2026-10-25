@@ -1942,8 +1942,17 @@ def g21_channel():
   return state.get("g21_channel") or G21_CHANNEL or None
 
 
+_g21_urls = {}  # номер игры → адрес её страницы (Голд и Раздача на одну игру — без повторного поиска)
+
+
 def g21_open_game(page, no):
   """Находит в поиске игру «21 Очко» №no и открывает её страницу."""
+  known = _g21_urls.get(no)
+  if known:
+    if page.url != known:
+      page.goto(known, wait_until="domcontentloaded", timeout=15000)
+      page.wait_for_timeout(1000)
+    return page.url
   search_url = f"https://{cur_site()}{G21_SEARCH_PATH}"
   deadline = time.time() + G21_FIND_TIMEOUT
   last_numbers = []
@@ -1972,6 +1981,9 @@ def g21_open_game(page, no):
           except Exception:
             raise RuntimeError(f"не открылась страница игры #{no}")
         page.wait_for_timeout(1500)
+        _g21_urls[no] = page.url
+        for old_no in [k for k in _g21_urls if k < no - 20]:
+          _g21_urls.pop(old_no, None)
         return page.url
       last_numbers = (res or {}).get("numbers") or last_numbers
     if last_numbers and min(last_numbers) > no:
