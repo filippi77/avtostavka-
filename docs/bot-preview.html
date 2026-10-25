@@ -135,6 +135,17 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .toast { justify-self: center; background: var(--fg); color: var(--bg); border-radius: 10px; padding: 8px 14px; font-size: 13.5px; max-width: 90%; text-align: center; }
 .proposal-tag { display: inline-block; font-size: 12px; font-weight: 600; background: color-mix(in srgb, var(--star) 25%, transparent); color: var(--fg); padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: 3px; font-family: var(--font-body); }
 
+/* Дуэль и крутилка */
+.duel-score { font-variant-numeric: tabular-nums; display: grid; gap: 2px; margin-top: 4px; }
+.duel-score b { font-weight: 600; }
+.slot { font-size: 64px; line-height: 1; text-align: center; padding: 6px 0 2px; }
+.slot-reels { display: flex; justify-content: center; gap: 6px; font-size: 26px; margin-top: 2px; }
+.slot-reels span { background: var(--tag-bg); border-radius: 8px; padding: 2px 8px; }
+.prize-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 4px; }
+.prize-table td { padding: 6px 4px; border-top: 1px solid var(--line); }
+.prize-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--win); }
+.prize-table tr:first-child td { border-top: 0; }
+
 @media (max-width: 820px) {
   .scenario, .stars { grid-template-columns: minmax(0, 1fr); }
   .stars .phone { order: 2; }
@@ -290,6 +301,95 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
         <span class="toast">✅ #N209 · ♥ · 50 фишек. Баланс 590</span>
         <span class="marker">видно только тому, кто нажал</span>
       </div>
+    </div>
+  </section>
+
+  <section class="scenario" aria-labelledby="duel">
+    <div>
+      <div class="eyebrow">Новый режим</div>
+      <h2 id="duel">Дуэль ⚔️ <span class="proposal-tag">предложение, ещё не сделано</span></h2>
+      <ol class="steps">
+        <li><div><b>Вызов</b><p>Ответить сопернику <code>/duel 500</code> или нажать «⚔️ Дуэль» на карточке. Без ответа на сообщение вызов открытый: принять может любой.</p></div></li>
+        <li><div><b>Ставки замораживаются</b><p>У обоих списывается по 500 обычных фишек. Турнирными играть нельзя.</p></div></li>
+        <li><div><b>10 игр, выбор скрыт</b><p>До начала игры чат видит только «✅ выбрал / ⏳ думает». Масти раскрываются, когда канал опубликовал пост игры: менять уже поздно.</p></div></li>
+        <li><div><b>Победитель забирает всё</b><p>Кто угадал больше, получает 1000. При ничьей ставки возвращаются, бот себе ничего не берёт.</p></div></li>
+      </ol>
+    </div>
+
+    <div class="phone" role="img" aria-label="Макет дуэли в Baccara Chat">
+      <div class="phone-head">
+        <div class="avatar av-chat">BC</div>
+        <div><strong>Baccara Chat</strong><small>Руслан, Алсу, бот</small></div>
+      </div>
+      <div class="feed">
+        <div class="msg"><div class="avatar av-user">Р</div><div class="bubble">
+          <div class="who user">Руслан</div>
+          <div class="text"><span class="cmd">/duel 500</span> ↩︎ Алсу</div>
+          <div class="time">07:40</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot" style="max-width:94%">
+          <div class="who bot">Конкурс баккара <em>бот</em></div>
+          <div class="text"><b>⚔️ Руслан вызывает Алсу на дуэль!</b><br>Ставка 500 фишек · 10 игр · масть игрока<br>⏳ Вызов действует 10 минут</div>
+          <div class="btn-grid"><div class="btn-row" style="--n:2"><span>⚔️ Принять</span><span>Отказаться</span></div></div>
+          <div class="time">07:40</div></div></div>
+
+        <span class="marker">Алсу приняла · идёт игра #N314</span>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot" style="max-width:94%">
+          <div class="who bot">Конкурс баккара <em>бот</em></div>
+          <div class="text"><b>⚔️ Руслан vs Алсу</b> · 500 фишек · счёт <b>4 : 3</b>
+            <div class="duel-score">
+              <span>#N312: Руслан <span class="r">♥</span> ✅ · Алсу <span class="k">♠</span> ❌</span>
+              <span>#N313: Руслан <span class="k">♣</span> ❌ · Алсу <span class="r">♦</span> ✅</span>
+              <span><b>#N315:</b> Руслан ✅ выбрал · Алсу ⏳ думает</span>
+            </div></div>
+          <div class="btn-grid"><div class="btn-row"><span>♠</span><span>♣</span><span class="r">♥</span><span class="r">♦</span></div></div>
+          <div class="time">07:52</div></div></div>
+        <span class="toast">Вы выбрали ♥ на #N315 — соперник не видит</span>
+
+        <span class="marker">после 10-й игры</span>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="who bot">Конкурс баккара <em>бот</em></div>
+          <div class="text">🏆 <b>Руслан победил 6 : 4</b> и забирает <b class="win">1000 фишек</b>!</div>
+          <div class="time">07:58</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="stars" aria-labelledby="spin">
+    <div class="phone" role="img" aria-label="Макет ежедневной крутилки в личке с ботом">
+      <div class="phone-head">
+        <div class="avatar av-bot">🎴</div>
+        <div><strong>Конкурс баккара</strong><small>личные сообщения</small></div>
+      </div>
+      <div class="feed">
+        <div class="msg" style="justify-content:flex-end"><div class="bubble">
+          <div class="text">🎰 Крутить</div>
+          <div class="time">08:01</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="slot" aria-hidden="true">🎰</div>
+          <div class="slot-reels"><span>🍋</span><span>🍋</span><span>🍋</span></div>
+          <div class="time">08:01</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="text">🎉 Три лимона! <b class="win">+300 фишек</b>. Баланс: 1 785<br>Следующая попытка — завтра.</div>
+          <div class="time">08:01</div></div></div>
+        <div class="msg" style="justify-content:flex-end"><div class="bubble">
+          <div class="text">🎰 Крутить</div>
+          <div class="time">08:02</div></div></div>
+        <div class="msg"><div class="avatar av-bot">🎴</div><div class="bubble bot">
+          <div class="text">Сегодня уже крутили. Следующая попытка через 23 ч 59 мин.</div>
+          <div class="time">08:02</div></div></div>
+      </div>
+    </div>
+    <div class="note">
+      <div class="eyebrow" style="margin:0">Раз в день, бесплатно <span class="proposal-tag">предложение</span></div>
+      <h2 id="spin">Крутилка 🎰</h2>
+      <p>Кнопка «🎰 Крутить» в кабинете. Бот отправляет анимированный слот Telegram, и результат выбирает <strong>сам Telegram</strong> — подкрутить его нельзя ни боту, ни админу.</p>
+      <table class="prize-table" aria-label="Выигрыши крутилки">
+        <tr><td>7️⃣ 7️⃣ 7️⃣ — джекпот</td><td>+1 000</td></tr>
+        <tr><td>Три одинаковых (🍋 🍇 BAR)</td><td>+300</td></tr>
+        <tr><td>Две одинаковых</td><td>+50</td></tr>
+        <tr><td>Не совпало</td><td>+10 за попытку</td></tr>
+      </table>
+      <p><strong>Только бесплатно и раз в день.</strong> Если крутить за купленные фишки, это уже игровой автомат, а не бонус.</p>
     </div>
   </section>
 
