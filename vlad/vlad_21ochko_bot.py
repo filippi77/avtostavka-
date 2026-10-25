@@ -1292,6 +1292,54 @@ def auto21_add(line):
         _auto21_queue.append(line)
 
 
+# (sid, игра), по которым промах уже понят по ходу раздачи и следующая ставка ушла
+_auto21_early = set()
+CARD_RE = re.compile(r"(10|[2-9JQKA])\s*[♠♣♥❤♦]")
+
+
+def auto21_lost_early(key, cards):
+    """Можно ли по картам идущей игры уже точно сказать, что линия не зайдёт.
+    cards — [карты Игрока, карты Дилера] из скобок поста."""
+    if key == "r":       # Раздача: кто-то взял 3-ю карту — раздачей игра уже не кончится
+        return any(len(c) >= 3 for c in cards)
+    if key == "g":       # Голд: у обоих видны первые две карты, и ни у кого не два туза
+        return (len(cards) == 2 and all(len(c) >= 2 for c in cards)
+                and not any(c[0] == "A" and c[1] == "A" for c in cards))
+    return False
+
+
+def auto21_early(chat_id, text):
+    """Пост игры ещё правится по ходу раздачи. Если линия уже точно не заходит —
+    сразу шлём RESULT win=0 и ставку на следующую игру, не дожидаясь итога."""
+    if not AUTO21_CHANNEL:
+        return
+    try:
+        g = int(game_no_from_post(text) or 0)
+    except ValueError:
+        return
+    if not g:
+        return
+    cards = [CARD_RE.findall(h) for h in re.findall(r"\(([^)]*)\)", text or "")[:2]]
+    with column_lock:
+        st = grox_state(chat_id)
+        for r in st["rows"]:
+            if r["status"] != "⏳" or r["key"] not in AUTO21_OUT or not r.get("sid"):
+                continue
+            n = g - r["start"] + 1          # какой это шаг цепочки
+            if n < 1 or n > len(r["stakes"]) or (r["sid"], g) in _auto21_early:
+                continue
+            if not auto21_lost_early(r["key"], cards):
+                continue
+            _auto21_early.add((r["sid"], g))
+            auto21_add(auto21_line("RESULT", r, g, win=0))
+            if n < len(r["stakes"]):
+                auto21_add(auto21_line("BET", r, g + 1, step=n + 1, max=len(r["stakes"]),
+                                       kf=format(r["odds"], "g")))
+    if len(_auto21_early) > 500:
+        _auto21_early.clear()
+    auto21_flush()
+
+
 GROX_LABEL = {"x": "🤝 Ничья", "o": "🎯 21 очко", "g": "🥇 Голд", "r": "🎴 Раздача", "c4": "🃏 4 карты"}
 
 
@@ -1405,7 +1453,10 @@ def process_grox(chat_id, text):
             st["stats"][r["key"]][1] += 1
         if r["status"] in ("✅", "❌"):
             st["bank"] = round(st["bank"] + r["result"], 2)
-        if r["key"] in AUTO21_OUT and r.get("sid"):
+        if r["key"] in AUTO21_OUT and r.get("sid") and (r["sid"], g) in _auto21_early:
+            if r["status"] == "✅":
+                print(f"AUTO21: {r['sid']} #{g} — по ходу игры был промах, а в итоге заход")
+        elif r["key"] in AUTO21_OUT and r.get("sid"):
             auto21_add(auto21_line("RESULT", r, g, win=1 if r["status"] == "✅" else 0))
             if r["status"] == "⏳":                        # мимо — следующий шаг догона
                 auto21_add(auto21_line("BET", r, g + 1, step=n + 1, max=len(r["stakes"]),
@@ -1495,6 +1546,10 @@ def process_column_post(chat_id, text):
     проверяет заход/незаход по всем строкам, добавляет новый прогноз и публикует
     одной правкой. Посты «идёт раздача» столбик не трогают."""
     if not game_is_finished(text):
+        try:
+            auto21_early(chat_id, text)     # раздача ещё идёт — быстрый промах для автоставки
+        except Exception as e:
+            print("AUTO21 по ходу игры:", e)
         return
     with column_lock:
         voided = void_stale_rows(chat_id, text)
