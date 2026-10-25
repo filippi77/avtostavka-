@@ -143,7 +143,7 @@ G21_LADDERS = {
     "РАЗДАЧА": [95, 140, 215, 320, 480, 720, 1080, 1620, 2430, 3650],
 }
 G21_MAX_ODDS_DIFF = 0.25  # КФ на сайте отличается от сигнала больше чем на 25% — не ставим
-G21_FIND_TIMEOUT = 60  # сек ждём, пока игра появится в поиске
+G21_FIND_TIMEOUT = 40  # сек ждём, пока игра появится в поиске
 
 GAMES = {"tennis": "🏓 Теннис", "penalty": "⚽ Пенальти", "g21": "🃏 21 очко"}
 MARKETS = ("ТМ", "ТБ", "П1", "П2", "ГОЛД", "РАЗДАЧА")
@@ -1942,6 +1942,19 @@ def g21_channel():
   return state.get("g21_channel") or G21_CHANNEL or None
 
 
+# Самые свежие номера игр из канала: по ним старые сигналы в очереди пропускаются сразу
+_g21_seen = {"bet": 0, "done": 0}
+
+
+def g21_stale(no):
+  """Причина пропуска, если игра no уже прошла (пришли сигналы на следующие игры)."""
+  if _g21_seen["done"] >= no:
+    return f"игра #{no} уже сыграна — пропускаю, ставлю на следующую"
+  if _g21_seen["bet"] > no:
+    return f"пришёл сигнал на игру #{_g21_seen['bet']} — #{no} уже не успеть, пропускаю"
+  return None
+
+
 _g21_urls = {}  # номер игры → адрес её страницы (Голд и Раздача на одну игру — без повторного поиска)
 
 
@@ -1971,6 +1984,9 @@ def g21_open_game(page, no):
     loaded_at = time.time()
     while time.time() < deadline:
       page.wait_for_timeout(1000)
+      stale = g21_stale(no)
+      if stale:
+        raise SkipSignal(stale)
       res = page.evaluate(G21_FIND_JS, [G21_GAME_TITLE, no])
       if res and res.get("found"):
         if res.get("href"):
@@ -2035,6 +2051,9 @@ def prepare_21_bet(page, sig, stake):
     raise SkipSignal(f"исход {sig['market']} для 21 очко не поддерживается")
   _, block_title, coupon_word = out
   no = sig["match_no"]
+  stale = g21_stale(no)
+  if stale:
+    raise SkipSignal(stale)
 
   url = g21_open_game(page, no)
   with lock:
@@ -2154,6 +2173,10 @@ def _process_21_message(msg, is_edit=False):
       send(f"⚠️ 21 очко: исход {html.escape(ev[1])} пока не поддерживается — пропуск.")
     return
   roll_day()
+  m_no = re.search(r"game=(\d+)", msg.text or msg.caption or "")
+  if m_no:
+    key = "bet" if ev["kind"] == "signal" else "done"
+    _g21_seen[key] = max(_g21_seen[key], int(m_no.group(1)))
   if ev["kind"] == "signal":
     if not game_on("g21") or not state["running"]:
       return  # 21 очко выключено — сигнал тихо пропускаем
@@ -2726,6 +2749,12 @@ def job_bet(page, job):
     except Exception as net_err:
       print(f"⚠️ Ошибка отправки в Telegram: {net_err}")
     return None
+
+  if game == "g21":
+    stale = g21_stale(sig.get("match_no") or 0)
+    if stale:
+      send(f"⏭ {html.escape(describe(sig))}: {html.escape(stale)}")
+      return  # без браузера и скриншота — очередь сразу идёт дальше
 
   reject_reason = None
   with lock:
