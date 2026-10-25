@@ -23,6 +23,11 @@ class FakeBot:
         self.sent: list[tuple[int, str]] = []
         self.edits: list[str] = []
 
+    async def __call__(self, method, request_timeout=None):
+        # message.reply(...) и т.п. вызывают бота напрямую с объектом метода
+        self.sent.append((getattr(method, "chat_id", None), getattr(method, "text", "")))
+        return SimpleNamespace(message_id=len(self.sent))
+
     async def me(self):
         return SimpleNamespace(username="suit_bot")
 
@@ -316,5 +321,35 @@ def test_give_all(tmp_path):
 
         await tour.finish(CFG, db, bot, await db.get_tournament(tid))
         assert "некому" in await admin.give_all(CFG, db, bot, "tour", 200, announce=False)
+
+    run_with_db(tmp_path, body)
+
+
+def test_setchat_from_anonymous_group_admin(tmp_path):
+    import datetime
+
+    from aiogram import Dispatcher
+    from aiogram.types import Update
+
+    from suitbot import admin
+
+    def setchat(sender_chat_id, user_id):
+        return Update.model_validate({"update_id": 1, "message": {
+            "message_id": 1, "date": datetime.datetime.now(), "text": "/setchat",
+            "entities": [{"type": "bot_command", "offset": 0, "length": 8}],
+            "chat": {"id": -100555, "type": "supergroup", "title": "Penalty"},
+            "from": {"id": user_id, "is_bot": True, "first_name": "Group"},
+            "sender_chat": {"id": sender_chat_id, "type": "supergroup" if sender_chat_id == -100555 else "channel",
+                            "title": "x"},
+        }})
+
+    async def body(db):
+        bot = FakeBot()
+        dp = Dispatcher()
+        dp.include_router(admin.build_router(CFG, db))
+        await dp.feed_update(bot, setchat(-200, 136817688))  # от имени чужого канала — не админ
+        assert await db.get_state("main_chat") is None
+        await dp.feed_update(bot, setchat(-100555, 1087968824))  # анонимный админ группы
+        assert await db.get_state("main_chat") == "-100555"
 
     run_with_db(tmp_path, body)

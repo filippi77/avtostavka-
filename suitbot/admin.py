@@ -180,7 +180,10 @@ def build_router(cfg: Config, db: DB) -> Router:
         text, kb = await gift_confirm(db, wallet, int(amount))
         await message.answer(text, reply_markup=kb)
 
-    @router.message(Command("setchat"), is_admin, F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
+    # Анонимный админ пишет от имени самой группы (sender_chat == чат) — так может только админ этой группы.
+    is_group_admin = is_admin | (F.sender_chat.id == F.chat.id)
+
+    @router.message(Command("setchat"), is_group_admin, F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
     async def cmd_setchat(message: Message) -> None:
         await db.set_state("main_chat", str(message.chat.id))
         await message.reply("✅ Этот чат выбран основным: сюда будут приходить карточки игр и объявления турнира.")
