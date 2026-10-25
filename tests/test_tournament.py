@@ -294,3 +294,26 @@ def test_format_ends_without_tz_database(monkeypatch):
     tz = ZoneInfo("Europe/Moscow")
     ts = int(datetime(2025, 10, 25, 18, 30, tzinfo=tz).timestamp())
     assert tour.format_ends(CFG, ts) == "25.10 18:30"
+
+
+def test_give_all(tmp_path):
+    from suitbot import admin
+
+    async def body(db):
+        tid = await with_players(db)
+        await db.set_state("main_chat", "-555")
+        bot = FakeBot()
+        note = await admin.give_all(CFG, db, bot, "main", 1000, announce=True)
+        assert note == "Выдано +1000 обычных фишек: 3 игрокам."
+        assert [(await db.get_user(u))["balance"] for u in (1, 2, 3)] == [1500] * 3
+        assert bot.sent[-1][0] == -555 and "+1000" in bot.sent[-1][1]
+
+        bot.sent.clear()
+        await admin.give_all(CFG, db, bot, "tour", 200, announce=False)
+        assert (await db.get_entry(tid, 2))["balance"] == 1200
+        assert bot.sent == []
+
+        await tour.finish(CFG, db, bot, await db.get_tournament(tid))
+        assert "некому" in await admin.give_all(CFG, db, bot, "tour", 200, announce=False)
+
+    run_with_db(tmp_path, body)

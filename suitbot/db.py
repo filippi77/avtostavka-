@@ -125,6 +125,22 @@ class DB:
         user = await self.get_user(user_id)
         return user["last_bonus"] + period - now
 
+    async def users_count(self) -> int:
+        cur = await self.conn.execute("SELECT COUNT(*) AS n FROM users")
+        return (await cur.fetchone())["n"]
+
+    async def give_all(self, amount: int, tournament_id: int | None = None) -> int:
+        """Начисляет всем игрокам (или всем участникам турнира). Возвращает, скольким."""
+        if tournament_id is None:
+            cur = await self.conn.execute("UPDATE users SET balance = balance + ?", (amount,))
+        else:
+            cur = await self.conn.execute(
+                "UPDATE tournament_entries SET balance = balance + ? WHERE tournament_id = ?",
+                (amount, tournament_id),
+            )
+        await self.conn.commit()
+        return cur.rowcount
+
     async def set_pref(self, user_id: int, stake: int | None = None, wallet: str | None = None) -> None:
         if stake is not None:
             await self.conn.execute("UPDATE users SET pref_stake = ? WHERE id = ?", (stake, user_id))

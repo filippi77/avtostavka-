@@ -17,6 +17,8 @@ from .db import DB
 log = logging.getLogger(__name__)
 
 TOURNAMENT_DAYS = (1, 3, 7)
+GIFT_AMOUNTS = {"main": (500, 1000, 5000), "tour": (200, 500, 1000)}
+WALLET_NAMES = {"main": "обычных", "tour": "турнирных"}
 
 
 def invite_text(cfg: Config, tournament=None) -> str:
@@ -93,9 +95,51 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         )
         for f in cards.CARD_FREQUENCIES
     ])
+    rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:refresh")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def gift_menu(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]:
+    current = await db.active_tournament()
+    rows = [[InlineKeyboardButton(text=f"💰 +{a}", callback_data=f"adm:gq:main:{a}") for a in GIFT_AMOUNTS["main"]]]
+    text = f"🎁 <b>Выдать всем фишки</b>\n\n💰 Обычные — всем игрокам ({await db.users_count()})"
+    if current:
+        rows.append([InlineKeyboardButton(text=f"🏆 +{a}", callback_data=f"adm:gq:tour:{a}") for a in GIFT_AMOUNTS["tour"]])
+        text += f"\n🏆 Турнирные — всем участникам турнира ({await db.entries_count(current['id'])}), места не меняются"
+    text += "\n\nДругая сумма: <code>/giveall 2000</code> или <code>/giveall турнир 300</code>"
+    rows.append([InlineKeyboardButton(text="← Назад", callback_data="adm:refresh")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def gift_confirm(db: DB, wallet: str, amount: int) -> tuple[str, InlineKeyboardMarkup]:
+    current = await db.active_tournament()
+    who = f"всем участникам турнира ({await db.entries_count(current['id'])})" if wallet == "tour" and current \
+        else f"всем игрокам ({await db.users_count()})"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, и объявить в чате", callback_data=f"adm:gd:{wallet}:{amount}:1")],
+        [InlineKeyboardButton(text="✅ Да, без объявления", callback_data=f"adm:gd:{wallet}:{amount}:0")],
+        [InlineKeyboardButton(text="Отмена", callback_data="adm:gift")],
+    ])
+    return f"Выдать <b>+{amount}</b> {WALLET_NAMES[wallet]} фишек {who}?", kb
+
+
+async def give_all(cfg: Config, db: DB, bot: Bot, wallet: str, amount: int, announce: bool) -> str:
+    current = await db.active_tournament()
+    if wallet == "tour" and not current:
+        return "Турнира нет — турнирные фишки выдать некому."
+    n = await db.give_all(amount, current["id"] if wallet == "tour" else None)
+    if announce:
+        main_chat = await db.get_state("main_chat")
+        if main_chat:
+            text = f"🎁 <b>Подарок от админа!</b> Всем {'участникам турнира ' if wallet == 'tour' else ''}" \
+                   f"+{amount} {WALLET_NAMES[wallet]} фишек. Удачи в прогнозах!"
+            try:
+                await bot.send_message(int(main_chat), text)
+            except Exception:
+                log.exception("failed to announce gift")
+    return f"Выдано +{amount} {WALLET_NAMES[wallet]} фишек: {n} игрокам."
 
 
 def build_router(cfg: Config, db: DB) -> Router:
@@ -118,6 +162,18 @@ def build_router(cfg: Config, db: DB) -> Router:
             "Впишите его в настройку ADMINS (в начале файла бота) и перезапустите бота."
         )
 
+    @router.message(Command("giveall"), is_admin)
+    async def cmd_giveall(message: Message, bot: Bot) -> None:
+        """/giveall 1000 — всем обычные фишки; /giveall турнир 300 — турнирные участникам."""
+        args = (message.text or "").split()[1:]
+        wallet = "tour" if args and args[0].lower() in ("турнир", "tour", "т") else "main"
+        amount = args[-1] if args else ""
+        if not amount.isdigit() or int(amount) <= 0:
+            await message.reply("Формат: <code>/giveall 1000</code> или <code>/giveall турнир 300</code>")
+            return
+        text, kb = await gift_confirm(db, wallet, int(amount))
+        await message.answer(text, reply_markup=kb)
+
     @router.message(Command("setchat"), is_admin, F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
     async def cmd_setchat(message: Message) -> None:
         await db.set_state("main_chat", str(message.chat.id))
@@ -129,7 +185,15 @@ def build_router(cfg: Config, db: DB) -> Router:
         action = parts[1]
         note = None
 
-        if action == "start":
+        if action in ("gift", "gq"):
+            # Подменю выдачи и подтверждение — показываем их вместо панели.
+            text, kb = await gift_menu(cfg, db) if action == "gift" else await gift_confirm(db, parts[2], int(parts[3]))
+            await query.answer()
+            await query.message.edit_text(text, reply_markup=kb)
+            return
+        if action == "gd":
+            note = await give_all(cfg, db, bot, parts[2], int(parts[3]), parts[4] == "1")
+        elif action == "start":
             days = int(parts[2])
             started = await tour.start(cfg, db, bot, int(time.time()) + days * 86400)
             note = f"Турнир запущен на {days} дн." if started else "Турнир уже идёт."
