@@ -78,6 +78,13 @@ class Config:
     # Куда объявлять начало и итоги, кроме чата, выбранного командой /setchat.
     tournament_chats: set[int] = field(default_factory=lambda: _ids(os.getenv("TOURNAMENT_CHATS", "")))
 
+    # Какую игру ведёт бот: baccarat (масти по постам статистики баккары)
+    # или penalty (П1/П2 и тотал по постам FIFA Penalty).
+    game: str = os.getenv("GAME", "baccarat")
+    # Пенальти: считать, что игра N началась, как только закончилась N-1.
+    # Так ставки закрываются заранее, даже если канал не успел обновить счёт.
+    penalty_close_on_prev_finish: bool = os.getenv("PENALTY_CLOSE_ON_PREV_FINISH", "1") == "1"
+
     # Язык для игроков по умолчанию (ru | uz); меняется в /admin.
     lang: str = os.getenv("BOT_LANG", "ru")
 

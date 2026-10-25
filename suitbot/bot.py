@@ -21,7 +21,7 @@ from aiogram.types import (
     User,
 )
 
-from . import admin, betting, cards, duels, i18n, rating
+from . import admin, betting, cards, duels, i18n, penalty, rating
 from . import tournament as tour
 from .access import SubscriptionChecker
 from .betting import describe_pick
@@ -228,7 +228,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
             await message.reply(usage)
             return
         game, amount = int(args[0].lstrip("#Nn")), int(args[2])
-        parsed = parse_pick(args[1])
+        parsed = penalty.parse_pick(args[1]) if cfg.game == "penalty" else parse_pick(args[1])
         if not parsed:
             await message.reply(t("bet_bad_pick") + usage)
             return
@@ -287,24 +287,62 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
             return False
         return source.id in cfg.result_sources or (source.username or "").lower() in cfg.result_sources
 
+    def since() -> int:
+        return int(time.time()) - cfg.bet_ttl_hours * 3600
+
+    async def mark_started(number: int, bot: Bot) -> bool:
+        """Игра началась: закрываем ставки. True — если узнали об этом впервые."""
+        first = not await db.game_seen_since(number, since())
+        await db.mark_game_seen(number, fresh_after=since(), wrap=cfg.game_number_wrap)
+        await cards.close_for_game(cfg, db, bot, number)
+        if first:
+            await duels.on_game_started(cfg, db, bot, number)
+        return first
+
     async def handle_result_post(message: Message, bot: Bot) -> None:
         text = message.text or message.caption
         number = parse_game_number(text)
         if number is None or not from_results_source(message):
             return
-        since = int(time.time()) - cfg.bet_ttl_hours * 3600
-        first_post = not await db.game_seen_since(number, since)
-        await db.mark_game_seen(number, fresh_after=since)
+        if cfg.game == "penalty":
+            await handle_penalty_post(message, bot, text)
+            return
         # Пост игры N: закрываем ставки на N и сразу открываем карточку на N+1.
-        await cards.close_for_game(cfg, db, bot, number)
-        if first_post:
+        if await mark_started(number, bot):
             await post_next_card(message, bot, number)
-            await duels.on_game_started(cfg, db, bot, number)
 
         result = parse_game(text)
         if result and result.finished:
-            await settle(result, bot)
-            await duels.on_game_result(cfg, db, bot, result)
+            player = " ".join(r + suit_emoji(s) for r, s in result.player_cards)
+            banker = " ".join(r + suit_emoji(s) for r, s in result.banker_cards)
+            header = t("result_header", game=result.number, pp=result.player_points, pc=player,
+                       bp=result.banker_points, bc=banker)
+            await settle(result.number, header, lambda kind, pick: bet_wins(kind, pick, result), bot)
+            await duels.on_game_result(cfg, db, bot, result.number, result.player_suits)
+
+    async def handle_penalty_post(message: Message, bot: Bot, text: str) -> None:
+        post = penalty.parse_post(text)
+        if not post:
+            return
+        if not post.started:
+            # Канал публикует серию заранее: запоминаем команды и коэффициенты, выкладываем карточку.
+            await db.save_penalty_game(post.number, post.home, post.away, post.odds, post.line)
+            if await db.last_game() is None:
+                await db.set_state("last_game", str(post.number - 1))
+            existing = await db.open_cards_for_game(post.number, since())
+            for card in existing:
+                await cards.refresh(cfg, db, bot, post.number, card["chat_id"])  # коэффициенты могли измениться
+            if not existing:
+                await post_next_card(message, bot, post.number)
+            return
+        await mark_started(post.number, bot)
+        if post.finished:
+            header = t("pen_result", game=post.number, home=escape(post.home), away=escape(post.away),
+                       a=post.score[0], b=post.score[1])
+            await settle(post.number, header, lambda kind, pick: penalty.bet_wins(kind, pick, post), bot)
+            await duels.on_game_result(cfg, db, bot, post.number, {post.winner} if post.winner else set())
+            if cfg.penalty_close_on_prev_finish:
+                await mark_started(post.number + 1, bot)
 
     async def post_next_card(message: Message, bot: Bot, number: int) -> None:
         main_chat = await db.get_state("main_chat")
@@ -322,27 +360,24 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         except Exception:
             log.exception("failed to post game card to %s", card_chat)
 
-    async def settle(result, bot: Bot) -> None:
-        bets = await db.open_bets_for_game(result.number)
+    async def settle(number: int, header: str, wins, bot: Bot) -> None:
+        bets = await db.open_bets_for_game(number)
         if not bets:
             return
+        info = await db.get_penalty_game(number, since()) if cfg.game == "penalty" else None
 
         reports: dict[int, list[str]] = defaultdict(list)
         for bet in bets:
-            won = bet_wins(bet["kind"], bet["pick"], result)
+            won = wins(bet["kind"], bet["pick"])
             payout = int(bet["amount"] * bet["coef"]) if won else 0
             if not await db.settle_bet(bet["id"], won, payout):
                 continue  # уже рассчитана (например, повторное редактирование поста)
             mark = f"✅ +{payout}" if won else f"❌ −{bet['amount']}"
             cup = "🏆 " if bet["wallet"] == "tour" else ""
             reports[bet["chat_id"]].append(
-                f"{cup}{escape(bet['name'])}: {describe_pick(bet['kind'], bet['pick'])} {mark}"
+                f"{cup}{escape(bet['name'])}: {describe_pick(bet['kind'], bet['pick'], info)} {mark}"
             )
 
-        player = " ".join(r + suit_emoji(s) for r, s in result.player_cards)
-        banker = " ".join(r + suit_emoji(s) for r, s in result.banker_cards)
-        header = t("result_header", game=result.number, pp=result.player_points, pc=player,
-                   bp=result.banker_points, bc=banker)
         for chat_id, lines in reports.items():
             try:
                 await bot.send_message(chat_id, "\n".join([header, *lines]))
@@ -446,6 +481,7 @@ async def main() -> None:
     db = DB(cfg.db_path)
     await db.open()
     i18n.set_lang(await db.get_state("lang", cfg.lang))
+    i18n.set_game(cfg.game)
     bot = Bot(cfg.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     subs = SubscriptionChecker(cfg)

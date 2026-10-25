@@ -35,3 +35,11 @@ def test_uzbek_words_in_commands():
     assert parse_pick("durrang") == ("side", "T")
     assert parse_pick("chillak") == ("suit", "♣")
     assert parse_pick("g'isht") == ("suit", "♦")
+
+
+@pytest.mark.parametrize("key", sorted(k for k in i18n.TEXTS if k.endswith("@pen")))
+def test_penalty_texts_match_base_placeholders(key):
+    base = key.removesuffix("@pen")
+    if base in i18n.TEXTS:
+        # пенальти-текст может не использовать часть подстановок, но не должен требовать новых
+        assert placeholders(i18n.TEXTS[key][0]) <= placeholders(i18n.TEXTS[base][0]), key

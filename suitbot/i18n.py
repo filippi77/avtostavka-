@@ -7,6 +7,8 @@
 
 LANGS = {"ru": "Русский", "uz": "O'zbekcha"}
 LANG = "ru"
+# В режиме пенальти тексты с ключом "<key>@pen" заменяют обычные.
+GAME = "baccarat"
 
 
 def set_lang(lang: str) -> None:
@@ -14,7 +16,14 @@ def set_lang(lang: str) -> None:
     LANG = lang if lang in LANGS else "ru"
 
 
+def set_game(game: str) -> None:
+    global GAME
+    GAME = game
+
+
 def t(key: str, **kwargs) -> str:
+    if GAME == "penalty" and f"{key}@pen" in TEXTS:
+        key = f"{key}@pen"
     ru, uz = TEXTS[key]
     text = uz if LANG == "uz" else ru
     return text.format(**kwargs) if kwargs else text
@@ -337,6 +346,105 @@ TEXTS: dict[str, tuple[str, str]] = {
     "invite_footer": ("\nФишки — игровая валюта, их нельзя вывести.", "\nFishkalar — o'yin valyutasi, ularni yechib olib bo'lmaydi."),
     "gift_all": ("🎁 <b>Подарок от админа!</b> Всем +{amount} фишек. Удачи в прогнозах!",
                  "🎁 <b>Admindan sovg'a!</b> Hammaga +{amount} fishka. Bashoratlarda omad!"),
+    # --- режим пенальти ---
+    "welcome@pen": (
+        "👋 Привет! Это игра в прогнозы на серии пенальти. Кнопки внизу — ваш кабинет.",
+        "👋 Salom! Bu penalti seriyalari bo'yicha bashorat o'yini. Pastdagi tugmalar — sizning kabinetingiz.",
+    ),
+    "help@pen": (
+        "<b>Как играть</b>\n\n"
+        "Канал публикует серии пенальти на пару игр вперёд — бот сразу выкладывает в чат карточку каждой серии. "
+        "Выберите сумму 💰 (и 🏆 Турнир, если идёт турнир), затем исход или тотал. "
+        "Ставки принимаются, пока серия не началась.\n\n"
+        "<b>На что ставить</b> (коэффициенты — из поста канала):\n"
+        "П1 / П2 — какая команда выиграет серию\n"
+        "ТБ / ТМ — голов в серии больше / меньше линии (например, 4.5)\n\n"
+        "Можно и командой: <code>/bet 45 п1 50</code>, <code>/bet 45 тб 50</code>, "
+        "турнирная — <code>/tbet 45 п2 50</code>\n\n"
+        "{duel_line}"
+        "🎰 Раз в сутки — бесплатная крутилка в кабинете: 777 → +{jackpot} фишек.\n"
+        "{bonus_line}\n"
+        "Фишки — игровая валюта: их нельзя вывести или обменять на Stars.",
+        "<b>Qanday o'ynash</b>\n\n"
+        "Kanal penalti seriyalarini bir necha o'yin oldin e'lon qiladi — bot darhol chatga har bir seriya kartochkasini chiqaradi. "
+        "Summani 💰 tanlang (turnir bo'lsa — 🏆 Turnir ham), keyin natija yoki totalni bosing. "
+        "Stavkalar seriya boshlanguncha qabul qilinadi.\n\n"
+        "<b>Nimaga tikish mumkin</b> (koeffitsientlar — kanal postidan):\n"
+        "P1 / P2 — qaysi jamoa seriyada yutadi\n"
+        "TB / TM — seriyadagi gollar chiziqdan ko'p / kam (masalan, 4.5)\n\n"
+        "Buyruq bilan ham bo'ladi: <code>/bet 45 p1 50</code>, <code>/bet 45 tb 50</code>, "
+        "turnir uchun — <code>/tbet 45 p2 50</code>\n\n"
+        "{duel_line}"
+        "🎰 Kuniga bir marta — kabinetda bepul aylantirish: 777 → +{jackpot} fishka.\n"
+        "{bonus_line}\n"
+        "Fishkalar — o'yin valyutasi: ularni yechib olish yoki Stars'ga almashtirish mumkin emas.",
+    ),
+    "help_duel@pen": (
+        "⚔️ Дуэль: ответьте сопернику в чате <code>/duel 500</code> — на {options} серий, "
+        "кто чаще угадает победителя, забирает обе ставки.\n",
+        "⚔️ Duel: chatda raqibingiz xabariga <code>/duel 500</code> deb javob bering — {options} seriya, "
+        "kim g'olibni ko'proq topsa, ikkala stavkani oladi.\n",
+    ),
+    "bet_usage@pen": ("Формат: <code>/{cmd} 45 п1 50</code> (номер серии, п1/п2/тб/тм, сумма)",
+                      "Format: <code>/{cmd} 45 p1 50</code> (seriya raqami, p1/p2/tb/tm, summa)"),
+    "bet_no_odds": ("По серии #N{game} ещё нет коэффициентов на эту ставку.",
+                    "#N{game} seriyasi uchun bu stavkaga hali koeffitsient yo'q."),
+    "pick_win": ("П{side} {team}", "P{side} {team}"),
+    "pick_over": ("ТБ {line}", "TB {line}"),
+    "pick_under": ("ТМ {line}", "TM {line}"),
+    "duel_p": ("П{side}", "P{side}"),
+    "duel_started@pen": ("⚔️ Дуэль началась! Выбирайте победителя ближайшей серии.",
+                         "⚔️ Duel boshlandi! Eng yaqin seriya g'olibini tanlang."),
+    "pen_card_title": ("⚽️ <b>Серия #N{game}</b> — {status}\n{home} vs {away}",
+                       "⚽️ <b>Seriya #N{game}</b> — {status}\n{home} vs {away}"),
+    "pen_card_counts": ("Ставок: П1 {w1} · П2 {w2} · ТБ {o} · ТМ {u}", "Stavkalar: P1 {w1} · P2 {w2} · TB {o} · TM {u}"),
+    "pen_card_hint": ("Выберите сумму (запоминается), затем исход или тотал.",
+                      "Summani tanlang (eslab qolinadi), keyin natija yoki totalni."),
+    "pen_card_hint_tour": ("Выберите сумму и кошелёк (запоминается), затем исход или тотал.",
+                           "Summa va hamyonni tanlang (eslab qolinadi), keyin natija yoki totalni."),
+    "pen_result": ("⚽️ <b>#N{game}</b>: {home} {a}:{b} {away}", "⚽️ <b>#N{game}</b>: {home} {a}:{b} {away}"),
+    "duel_challenge@pen": ("⚔️ <b>{c}</b> вызывает <b>{o}</b> на дуэль!\nСтавка {stake} фишек · {games} · угадываем победителя серии",
+                           "⚔️ <b>{c}</b> <b>{o}</b> ni duelga chaqiradi!\nStavka {stake} fishka · {games} · seriya g'olibini topamiz"),
+    "duel_news@pen": ("⚔️ <b>Новинка: дуэли!</b>\n\n"
+                      "Вызовите любого игрока чата один на один:\n"
+                      "1. Ответьте на его сообщение командой <code>/duel 500</code> (ставка от {min} до {max} фишек). "
+                      "Без ответа — открытый вызов, принять может любой.\n"
+                      "2. Соперник жмёт «⚔️ Принять» — у обоих замораживается ставка.\n"
+                      "3. Вызывающий выбирает длину: {options} серий. В каждой серии оба выбирают победителя (П1 или П2). "
+                      "Выбор соперника скрыт до начала серии.\n"
+                      "4. Кто угадал больше — забирает обе ставки. Ничья — ставки возвращаются.\n\n"
+                      "Дуэли — на обычных фишках, турнир они не трогают. Удачи! 🍀",
+                      "⚔️ <b>Yangilik: duellar!</b>\n\n"
+                      "Chatdagi istalgan o'yinchini yakkama-yakka chaqiring:\n"
+                      "1. Uning xabariga <code>/duel 500</code> deb javob bering (stavka {min} dan {max} fishkagacha). "
+                      "Javobsiz — ochiq chaqiruv, istalgan kishi qabul qilishi mumkin.\n"
+                      "2. Raqib «⚔️ Qabul qilish» ni bosadi — ikkalasining stavkasi muzlatiladi.\n"
+                      "3. Chaqiruvchi davomiylikni tanlaydi: {options} seriya. Har seriyada ikkalasi g'olibni (P1 yoki P2) tanlaydi. "
+                      "Raqibning tanlovi seriya boshlanguncha yashirin.\n"
+                      "4. Kim ko'proq topsa — ikkala stavkani oladi. Durrangda stavkalar qaytariladi.\n\n"
+                      "Duellar oddiy fishkalarda o'tadi, turnirga ta'sir qilmaydi. Omad! 🍀"),
+    "invite@pen": ("⚽️ <b>Прогнозы на пенальти — игра в чате</b>\n\n"
+                   "Угадывайте победителя серии и тотал голов, копите фишки и поднимайтесь в топ.\n\n"
+                   "<b>Как начать:</b>\n"
+                   "1. Нажмите «Начать играть» и затем «Старт» — сразу получите {start} фишек "
+                   "и кабинет с кнопками: баланс, бонус, рейтинг, турнир.\n"
+                   "2. Здесь выходит карточка каждой серии — выберите сумму и П1/П2 или ТБ/ТМ. "
+                   "Ставки принимаются, пока серия не началась.\n"
+                   "3. Забирайте бонус {bonus} фишек раз в {days} дн. и следите за рейтингом 📊.\n",
+                   "⚽️ <b>Penalti bo'yicha bashorat — chatdagi o'yin</b>\n\n"
+                   "Seriya g'olibini va gollar totalini toping, fishka to'plang va topga chiqing.\n\n"
+                   "<b>Qanday boshlash:</b>\n"
+                   "1. «O'ynashni boshlash» va keyin «Start» ni bosing — darhol {start} fishka "
+                   "va tugmali kabinet olasiz: balans, bonus, reyting, turnir.\n"
+                   "2. Bu yerda har bir seriya kartochkasi chiqadi — summani va P1/P2 yoki TB/TM ni tanlang. "
+                   "Stavkalar seriya boshlanguncha qabul qilinadi.\n"
+                   "3. Har {days} kunda {bonus} fishka bonus oling va reytingni kuzating 📊.\n"),
+    "tour_start@pen": ("🏆 <b>Турнир начался!</b> До {ends}.\n\n{rules}\n\n<b>Призы:</b>\n{prizes}\n\n"
+                       "Ставьте кнопками под карточкой серии (выберите «🏆 Турнир») или командой "
+                       "<code>/tbet 45 п1 50</code>. Таблица: /tournament",
+                       "🏆 <b>Turnir boshlandi!</b> {ends} gacha.\n\n{rules}\n\n<b>Sovrinlar:</b>\n{prizes}\n\n"
+                       "Seriya kartochkasidagi tugmalar bilan tiking («🏆 Turnir» ni tanlang) yoki "
+                       "<code>/tbet 45 p1 50</code> buyrug'i bilan. Jadval: /tournament"),
     "gift_tour": ("🎁 <b>Подарок от админа!</b> Всем участникам турнира +{amount} турнирных фишек. Удачи!",
                   "🎁 <b>Admindan sovg'a!</b> Barcha turnir ishtirokchilariga +{amount} turnir fishkasi. Omad!"),
 }

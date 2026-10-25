@@ -28,7 +28,7 @@ MEDALS = ("🥇", "🥈", "🥉")
 
 # На серверах без базы часовых поясов (нет пакета tzdata) ZoneInfo падает.
 # Тогда берём постоянное смещение: в Москве нет перехода на летнее время.
-_FALLBACK_OFFSETS = {"Europe/Moscow": 3, "Europe/Kyiv": 2, "Europe/Kiev": 2, "Europe/Minsk": 3}
+_FALLBACK_OFFSETS = {"Europe/Moscow": 3, "Europe/Kyiv": 2, "Europe/Kiev": 2, "Europe/Minsk": 3, "Asia/Tashkent": 5}
 
 
 def zone(name: str) -> tzinfo:

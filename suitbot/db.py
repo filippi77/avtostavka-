@@ -1,3 +1,4 @@
+import json
 import time
 
 import aiosqlite
@@ -95,6 +96,15 @@ CREATE TABLE IF NOT EXISTS duel_games (
     duel_id     INTEGER NOT NULL REFERENCES duels(id),
     game        INTEGER NOT NULL,
     PRIMARY KEY (duel_id, game)
+);
+-- Пенальти: команды и коэффициенты игры из последнего поста канала до её начала.
+CREATE TABLE IF NOT EXISTS penalty_games (
+    number      INTEGER PRIMARY KEY,
+    home        TEXT NOT NULL,
+    away        TEXT NOT NULL,
+    odds        TEXT NOT NULL,  -- JSON: {"1": 1.92, "2": 1.89, "O": 1.66, "U": 2.09}
+    line        REAL,
+    updated_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,
@@ -296,11 +306,12 @@ class DB:
 
     # --- игры ---------------------------------------------------------------
 
-    async def mark_game_seen(self, number: int, fresh_after: int) -> None:
-        """Отмечает, что по игре появился пост: ставки на неё больше не принимаются.
+    async def mark_game_seen(self, number: int, fresh_after: int, wrap: int = 1440) -> None:
+        """Отмечает, что игра началась: ставки на неё больше не принимаются.
 
         Номера игр повторяются по кругу, поэтому старую запись с тем же
-        номером (старше fresh_after) считаем новой игрой.
+        номером (старше fresh_after) считаем новой игрой. Последняя игра
+        не откатывается назад, если канал отредактировал пост старой игры.
         """
         now = int(time.time())
         await self.conn.execute(
@@ -309,11 +320,13 @@ class DB:
             "WHERE games.seen_at < ?",
             (number, now, fresh_after),
         )
-        await self.conn.execute(
-            "INSERT INTO state(key, value) VALUES ('last_game', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (str(number),),
-        )
+        last = await self.last_game()
+        if last is None or 0 < (number - last) % wrap < wrap // 2:
+            await self.conn.execute(
+                "INSERT INTO state(key, value) VALUES ('last_game', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(number),),
+            )
         await self.conn.commit()
 
     async def game_seen_since(self, number: int, since: int) -> bool:
@@ -474,6 +487,26 @@ class DB:
             "SELECT DISTINCT chat_id FROM bets WHERE tournament_id = ? AND chat_id < 0", (tournament_id,)
         )
         return [row["chat_id"] for row in await cur.fetchall()]
+
+    # --- пенальти ------------------------------------------------------------
+
+    async def save_penalty_game(self, number: int, home: str, away: str, odds: dict, line: float | None) -> None:
+        await self.conn.execute(
+            "INSERT INTO penalty_games(number, home, away, odds, line, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(number) DO UPDATE SET home = excluded.home, away = excluded.away, "
+            "odds = excluded.odds, line = excluded.line, updated_at = excluded.updated_at",
+            (number, home, away, json.dumps(odds), line, int(time.time())),
+        )
+        await self.conn.commit()
+
+    async def get_penalty_game(self, number: int, since: int = 0) -> dict | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM penalty_games WHERE number = ? AND updated_at >= ?", (number, since)
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return {"home": row["home"], "away": row["away"], "odds": json.loads(row["odds"]), "line": row["line"]}
 
     # --- дуэли --------------------------------------------------------------
 

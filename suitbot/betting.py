@@ -18,8 +18,28 @@ class BetError(Exception):
     """Ставка не принята; текст исключения можно показать игроку."""
 
 
-def describe_pick(kind: str, pick: str) -> str:
-    return suit_emoji(pick) if kind == "suit" else side_name(pick)
+def describe_pick(kind: str, pick: str, info: dict | None = None) -> str:
+    if kind == "suit":
+        return suit_emoji(pick)
+    if kind == "side":
+        return side_name(pick)
+    if kind == "win":
+        team = (info or {}).get("home" if pick == "1" else "away", "")
+        return t("pick_win", side=pick, team=team).strip()
+    if kind == "total":
+        return t("pick_over" if pick[0] == "O" else "pick_under", line=f"{float(pick[1:]):g}")
+    return pick
+
+
+async def penalty_coef(cfg: Config, db: DB, game: int, kind: str, pick: str) -> tuple[str, float, dict]:
+    """Коэффициент пенальти-ставки из поста канала. Для тотала к выбору добавляется линия: "O" → "O4.5"."""
+    info = await db.get_penalty_game(game, int(time.time()) - cfg.bet_ttl_hours * 3600)
+    side = pick[0] if kind == "total" else pick
+    if not info or side not in info["odds"] or (kind == "total" and info["line"] is None):
+        raise BetError(t("bet_no_odds", game=game))
+    if kind == "total":
+        pick = f"{side}{info['line']:g}"
+    return pick, info["odds"][side], info
 
 
 async def place(
@@ -53,7 +73,11 @@ async def place(
 
     if tournament_id is not None:
         await db.join_tournament(tournament_id, user_id, cfg.tournament_start_chips)
-    coef = cfg.payout(kind, pick)
+    info = None
+    if kind in ("win", "total"):
+        pick, coef, info = await penalty_coef(cfg, db, game, kind, pick)
+    else:
+        coef = cfg.payout(kind, pick)
     try:
         await db.place_bet(user_id, chat_id, game, kind, pick, amount, coef, tournament_id)
     except InsufficientFunds:
@@ -69,5 +93,5 @@ async def place(
         left = (await db.get_user(user_id))["balance"]
     return t(
         "bet_ok_tour" if tournament_id is not None else "bet_ok",
-        game=game, pick=describe_pick(kind, pick), amount=amount, coef=f"{coef:g}", win=int(amount * coef), left=left,
+        game=game, pick=describe_pick(kind, pick, info), amount=amount, coef=f"{coef:g}", win=int(amount * coef), left=left,
     )

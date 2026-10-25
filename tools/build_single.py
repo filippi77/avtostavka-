@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULES = ["i18n", "parser", "config", "db", "betting", "access", "tournament", "rating", "duels", "cards", "admin", "bot"]
+MODULES = ["i18n", "parser", "penalty", "config", "db", "betting", "access", "tournament", "rating", "duels", "cards", "admin", "bot"]
 
 HEADER = '''#!/usr/bin/env python3
 """Бот прогнозов на масти (баккара) — всё в одном файле.
@@ -79,6 +79,8 @@ class _EmbeddedImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 
 if __name__ == "__main__":
+    if not os.environ.get("BOT_TOKEN", "").split(":")[0].isdigit():
+        sys.exit("Впишите токен бота в SETTINGS (строка 'BOT_TOKEN') в начале этого файла.")
     _ensure_dependencies()
     sys.meta_path.insert(0, _EmbeddedImporter())
     import asyncio

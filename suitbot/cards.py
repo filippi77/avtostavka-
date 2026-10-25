@@ -11,6 +11,7 @@
 import asyncio
 import logging
 import time
+from html import escape
 
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -72,6 +73,53 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duel
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def pen_card_text(game: int, info: dict, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
+    over = sum(n for pick, n in counts.items() if pick.startswith("O"))
+    under = sum(n for pick, n in counts.items() if pick.startswith("U"))
+    lines = [
+        t("pen_card_title", game=game, status=t("card_closed") if closed else t("card_open"),
+          home=escape(info["home"]), away=escape(info["away"])),
+        t("pen_card_counts", w1=counts.get("1", 0), w2=counts.get("2", 0), o=over, u=under),
+    ]
+    if not closed:
+        lines.append(t("pen_card_hint_tour") if tournament_on else t("pen_card_hint"))
+    return "\n".join(lines)
+
+
+def pen_card_keyboard(game: int, info: dict, tournament_on: bool, bot_username: str | None,
+                      duels_on: bool = False) -> InlineKeyboardMarkup:
+    odds = info["odds"]
+    rows = []
+    if "1" in odds and "2" in odds:
+        rows.append([
+            InlineKeyboardButton(text=f"{betting.describe_pick('win', side, info)} ×{odds[side]:g}",
+                                 callback_data=f"b:{game}:win:{side}")
+            for side in ("1", "2")
+        ])
+    if info["line"] is not None and "O" in odds and "U" in odds:
+        rows.append([
+            InlineKeyboardButton(text=f"{betting.describe_pick('total', f'{side}{info['line']:g}')} ×{odds[side]:g}",
+                                 callback_data=f"b:{game}:total:{side}")
+            for side in ("O", "U")
+        ])
+    base = card_keyboard(game, tournament_on, bot_username, duels_on).inline_keyboard
+    return InlineKeyboardMarkup(inline_keyboard=rows + base[2:])  # суммы, кошелёк и нижний ряд — как в баккаре
+
+
+async def _render(cfg: Config, db: DB, game: int, counts: dict[str, int], closed: bool, me_username: str | None):
+    """Текст и кнопки карточки для текущей игры (баккара или пенальти). None — нечего показывать."""
+    on = await _tournament_on(cfg, db)
+    duels_on = await duels.enabled(cfg, db)
+    if cfg.game == "penalty":
+        info = await db.get_penalty_game(game, _since(cfg))
+        if not info:
+            return None
+        kb = None if closed else pen_card_keyboard(game, info, on, me_username, duels_on)
+        return pen_card_text(game, info, counts, closed, on), kb
+    kb = None if closed else card_keyboard(game, on, me_username, duels_on)
+    return card_text(cfg, game, counts, closed, on), kb
+
+
 def _since(cfg: Config) -> int:
     return int(time.time()) - cfg.bet_ttl_hours * 3600
 
@@ -81,14 +129,17 @@ async def _tournament_on(cfg: Config, db: DB) -> bool:
 
 
 async def maybe_post(cfg: Config, db: DB, bot: Bot, seen_game: int, chat_id: int) -> None:
-    """Вызывается при первом посте игры seen_game — карточка на следующую игру."""
+    """Вызывается при первом посте игры seen_game. В баккаре — карточка на следующую
+    игру, в пенальти — на эту же: канал публикует серии заранее."""
     every = await card_every(cfg, db)
-    game = seen_game + 1
+    game = seen_game if cfg.game == "penalty" else seen_game + 1
     if not every or game % every or await db.get_card(game, chat_id, _since(cfg)):
         return
-    on = await _tournament_on(cfg, db)
     me = await bot.me()
-    msg = await bot.send_message(chat_id, card_text(cfg, game, {}, False, on), reply_markup=card_keyboard(game, on, me.username, await duels.enabled(cfg, db)))
+    rendered = await _render(cfg, db, game, {}, False, me.username)
+    if not rendered:
+        return
+    msg = await bot.send_message(chat_id, rendered[0], reply_markup=rendered[1])
     await db.save_card(game, chat_id, msg.message_id)
 
 
@@ -96,14 +147,14 @@ async def refresh(cfg: Config, db: DB, bot: Bot, game: int, chat_id: int, closed
     card = await db.get_card(game, chat_id, _since(cfg))
     if not card or card["closed"]:
         return
-    on = await _tournament_on(cfg, db)
     counts = await db.bet_counts(game, chat_id, _since(cfg))
     me = await bot.me()
+    rendered = await _render(cfg, db, game, counts, closed, me.username)
     try:
-        await bot.edit_message_text(
-            text=card_text(cfg, game, counts, closed, on), chat_id=chat_id, message_id=card["message_id"],
-            reply_markup=None if closed else card_keyboard(game, on, me.username, await duels.enabled(cfg, db)),
-        )
+        if rendered:
+            await bot.edit_message_text(
+                text=rendered[0], chat_id=chat_id, message_id=card["message_id"], reply_markup=rendered[1],
+            )
     except Exception as e:  # "message is not modified" и т.п. — не страшно
         log.debug("card edit skipped: %s", e)
     if closed:
@@ -172,6 +223,9 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             return
         tournament_bet = user["pref_wallet"] == "tour" and await _tournament_on(cfg, db)
         chat_id = query.message.chat.id if query.message else query.from_user.id
+        if await db.game_seen_since(int(game), _since(cfg)):
+            await query.answer(t("bet_started", game=game), show_alert=True)
+            return
 
         if await confirm_enabled(cfg, db):
             # Первое нажатие показывает, на что ставка, второе — подтверждает.
@@ -180,11 +234,20 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
                 for k in [k for k in pending if k[0] == user["id"] or pending[k] < now]:
                     pending.pop(k)
                 pending[key] = now + cfg.bet_confirm_seconds
-                coef = cfg.payout(kind, pick)
+                info = None
+                if kind in ("win", "total"):
+                    try:
+                        full_pick, coef, info = await betting.penalty_coef(cfg, db, int(game), kind, pick)
+                    except betting.BetError as e:
+                        await query.answer(str(e), show_alert=True)
+                        return
+                    button = betting.describe_pick(kind, full_pick, info)
+                else:
+                    full_pick, coef = pick, cfg.payout(kind, pick)
+                    button = suit_emoji(pick) if kind == "suit" else betting.side_name(pick).capitalize()
                 stake = user["pref_stake"]
-                button = suit_emoji(pick) if kind == "suit" else betting.side_name(pick).capitalize()
                 await query.answer(
-                    t("bet_confirm", game=game, pick=betting.describe_pick(kind, pick), amount=stake,
+                    t("bet_confirm", game=game, pick=betting.describe_pick(kind, full_pick, info), amount=stake,
                       wallet=t("wallet_tour_word") if tournament_bet else "", coef=f"{coef:g}",
                       win=int(stake * coef), button=button, seconds=cfg.bet_confirm_seconds),
                     show_alert=True,

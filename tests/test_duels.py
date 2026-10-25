@@ -59,16 +59,16 @@ def test_full_duel_hidden_picks_and_winner(tmp_path):
         assert "игра идёт — Руслан ♥️ · Алсу ♠️" in bot.edits[-1]
         assert bot.last_markup.inline_keyboard[0][0].callback_data.endswith(":209:♠")
 
-        await duels.on_game_result(DCFG, db, bot, post(208, "10♥ 5♦"))  # ♥ есть, ♠ нет
+        await duels.on_game_result(DCFG, db, bot, 208, post(208, "10♥ 5♦").player_suits)  # ♥ есть, ♠ нет
         assert "счёт <b>1 : 0</b>" in bot.edits[-1]
-        await duels.on_game_result(DCFG, db, bot, post(208, "10♥ 5♦"))  # повтор не считается
+        await duels.on_game_result(DCFG, db, bot, 208, post(208, "10♥ 5♦").player_suits)  # повтор не считается
         assert "счёт <b>1 : 0</b>" in bot.edits[-1]
 
         for game, cards, picks in ((209, "2♠ 3♠", {1: "♦", 2: "♠"}), (210, "4♣ 9♥", {1: "♥"})):
             for uid, suit in picks.items():
                 await db.set_duel_pick(duel_id, game, uid, suit)
             await db.mark_game_seen(game, fresh_after=0)
-            await duels.on_game_result(DCFG, db, bot, post(game, cards))
+            await duels.on_game_result(DCFG, db, bot, game, post(game, cards).player_suits)
 
         duel = await db.get_duel(duel_id)
         assert duel["status"] == "finished" and duel["winner_id"] == 1  # 2 : 1
@@ -86,7 +86,7 @@ def test_draw_returns_stakes(tmp_path):
         duel_id = await start_duel(db)
         for game in (208, 209, 210):
             await db.mark_game_seen(game, fresh_after=0)
-            await duels.on_game_result(DCFG, db, bot, post(game, "2♠ 3♠"))  # никто не выбирал
+            await duels.on_game_result(DCFG, db, bot, game, post(game, "2♠ 3♠").player_suits)  # никто не выбирал
         assert (await db.get_duel(duel_id))["winner_id"] is None
         assert [(await db.get_user(u))["balance"] for u in (1, 2)] == [500, 500]
         assert "ничья" in bot.sent[-1][1]

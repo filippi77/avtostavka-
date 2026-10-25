@@ -23,7 +23,7 @@ from .config import Config
 from .db import DB
 from . import i18n
 from .i18n import t
-from .parser import SUITS, GameResult, suit_emoji
+from .parser import SUITS, suit_emoji
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +41,15 @@ def games_label(n: int) -> str:
     if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
         return f"{n} игры"
     return f"{n} игр"
+
+
+def _options(cfg: Config) -> list[str]:
+    """Что выбирают в дуэли: масть игрока (баккара) или победителя серии (пенальти)."""
+    return ["1", "2"] if cfg.game == "penalty" else list(SUITS)
+
+
+def _label(cfg: Config, pick: str) -> str:
+    return t("duel_p", side=pick) if cfg.game == "penalty" else suit_emoji(pick)
 
 
 def _name(name: str | None, n: int = 14) -> str:
@@ -106,7 +115,7 @@ async def render(cfg: Config, db: DB, duel: aiosqlite.Row) -> tuple[str, InlineK
         pick = by_game.get((uid, game))
         if not pick:
             return "—" + (" ❌" if with_hit else "")
-        return suit_emoji(pick["suit"]) + ((" ✅" if pick["hit"] else " ❌") if with_hit else "")
+        return _label(cfg, pick["suit"]) + ((" ✅" if pick["hit"] else " ❌") if with_hit else "")
 
     current = await current_game(db, duel) if duel["status"] == "active" else None
     for game in _games(duel):
@@ -132,7 +141,8 @@ async def render(cfg: Config, db: DB, duel: aiosqlite.Row) -> tuple[str, InlineK
     kb = None
     if current is not None:
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=suit_emoji(s), callback_data=f"duel:p:{duel['id']}:{current}:{s}") for s in SUITS
+            InlineKeyboardButton(text=_label(cfg, s), callback_data=f"duel:p:{duel['id']}:{current}:{s}")
+            for s in _options(cfg)
         ]])
     return "\n".join(lines), kb
 
@@ -172,11 +182,13 @@ async def on_game_started(cfg: Config, db: DB, bot: Bot, number: int) -> None:
             await refresh(cfg, db, bot, duel["id"])
 
 
-async def on_game_result(cfg: Config, db: DB, bot: Bot, result: GameResult) -> None:
+async def on_game_result(cfg: Config, db: DB, bot: Bot, number: int, winning_picks: set[str]) -> None:
+    """Итог игры: угадавшими считаются выбравшие что-то из winning_picks
+    (масти в картах игрока в баккаре, победитель серии в пенальти)."""
     for duel in await db.active_duels():
-        if result.number not in _games(duel):
+        if number not in _games(duel):
             continue
-        if await db.settle_duel_game(duel["id"], result.number, result.player_suits):
+        if await db.settle_duel_game(duel["id"], number, winning_picks):
             if len(await db.duel_settled_games(duel["id"])) >= duel["games_total"]:
                 await _finish(cfg, db, bot, duel)
             else:
@@ -333,7 +345,7 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             await refresh(cfg, db, bot, duel["id"])
             return
         await db.set_duel_pick(duel["id"], int(game), query.from_user.id, suit)
-        await query.answer(t("duel_pick_ok", suit=suit_emoji(suit), game=game))
+        await query.answer(t("duel_pick_ok", suit=_label(cfg, suit), game=game))
         await refresh(cfg, db, bot, duel["id"])
 
     return router
