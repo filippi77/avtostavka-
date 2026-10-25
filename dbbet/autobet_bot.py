@@ -3127,8 +3127,18 @@ def handle_result(r):
   return True
 
 
+START_TS = 0.0  # когда бот запущен (время Telegram); сигналы до него не ставим
+_old_skipped = {"n": 0}
+
+
 def enqueue_event(event_id, payload, received_at=None):
   validate_payload(payload)
+  if (payload["kind"] == "signal" and received_at is not None
+      and START_TS and received_at < START_TS - 2):
+    # пришёл, пока бот был выключен (Telegram отдаёт накопившееся после запуска)
+    _old_skipped["n"] += 1
+    print(f"⏭ сигнал {event_id} отправлен до запуска бота — пропуск")
+    return False
   with lock:
     if event_id in state["processed_posts"]:
       return False
@@ -4341,11 +4351,16 @@ def daily_report_loop():
 
 if __name__ == "__main__":
   roll_day()
+  # Сигналы, не поставленные до перезапуска, не берём — бот ждёт новые.
+  # Результаты оставляем: по ним закрываются открытые ставки.
   with lock:
-    for item in state["inbox"]:
-      if item["status"] == "pending" and item["kind"] == "signal":
-        item["generation"] = state["generation"]
-        item["dry"] = state["dry"]
+    old_signals = [
+        x for x in state["inbox"] if x["status"] == "pending" and x["kind"] == "signal"
+    ]
+    for item in old_signals:
+      state["inbox"].remove(item)
+      state["processed_posts"].append(item["id"])
+    state["processed_posts"] = state["processed_posts"][-2000:]
   save_state()
   for item in state["inbox"]:
     if item["status"] == "pending":
@@ -4353,10 +4368,20 @@ if __name__ == "__main__":
   threading.Thread(target=browser_worker, daemon=True).start()
   threading.Thread(target=daily_report_loop, daemon=True).start()
   threading.Thread(target=health_loop, daemon=True).start()
-  send(
-      " Автоставка запущена (автопауза отключена)\n\n" + status_text(),
-      reply_markup=panel(),
-  )
+  try:
+    hello = bot.send_message(
+        ADMIN_ID,
+        " Автоставка запущена (автопауза отключена)"
+        + (f"\n⏭ Старых сигналов из очереди убрано: {len(old_signals)}" if old_signals else "")
+        + "\nСигналы, отправленные до запуска, пропускаются — жду новые."
+        + "\n\n" + status_text(),
+        reply_markup=panel(),
+    )
+    # время сервера Telegram: не зависит от часов компьютера
+    START_TS = float(hello.date)
+  except Exception as e:
+    print("send error:", e)
+    START_TS = time.time()
   print("Бот успешно запущен и ожидает постов...")
 
   while True:
