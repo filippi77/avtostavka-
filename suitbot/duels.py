@@ -1,0 +1,300 @@
+"""Дуэли: двое угадывают масть в картах игрока в нескольких играх подряд.
+
+Вызов — ответом на сообщение соперника: /duel 500 (без ответа — открытый вызов,
+принять может любой). Когда вызов принят, у обоих списывается ставка. Под
+сообщением дуэли появляются кнопки мастей на ближайшую игру; выбор соперника
+скрыт, пока в канале не появился пост этой игры. Кто угадал больше, забирает
+обе ставки, при ничьей ставки возвращаются. Бот себе ничего не берёт.
+"""
+
+import asyncio
+import logging
+import time
+from html import escape
+
+import aiosqlite
+from aiogram import Bot, F, Router
+from aiogram.enums import ChatType
+from aiogram.filters import Command, CommandObject
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+
+from .access import SubscriptionChecker
+from .config import Config
+from .db import DB
+from .parser import SUITS, GameResult, suit_emoji
+
+log = logging.getLogger(__name__)
+
+HOW_TO = (
+    "Ответьте на сообщение соперника командой <code>/duel 500</code> — бот вызовет его на дуэль. "
+    "Без ответа вызов открытый: принять может любой."
+)
+
+
+async def enabled(cfg: Config, db: DB) -> bool:
+    return await db.get_state("duels_enabled", "1" if cfg.duels_enabled else "0") == "1"
+
+
+def _name(name: str | None, n: int = 14) -> str:
+    name = name or "?"
+    return escape(name if len(name) <= n else name[: n - 1] + "…")
+
+
+def _games(duel: aiosqlite.Row) -> range:
+    return range(duel["start_game"], duel["start_game"] + duel["games_total"])
+
+
+async def _seen(db: DB, duel: aiosqlite.Row, game: int) -> bool:
+    return await db.game_seen_since(game, duel["started_at"])
+
+
+async def current_game(db: DB, duel: aiosqlite.Row) -> int | None:
+    """Ближайшая игра дуэли, пост которой ещё не появился, — на неё выбирают масть."""
+    for game in _games(duel):
+        if not await _seen(db, duel, game):
+            return game
+    return None
+
+
+def _scores(duel: aiosqlite.Row, picks: list[aiosqlite.Row]) -> tuple[int, int]:
+    hits = {(p["user_id"], p["game"]) for p in picks if p["hit"]}
+    return (
+        sum(1 for uid, _ in hits if uid == duel["challenger_id"]),
+        sum(1 for uid, _ in hits if uid == duel["opponent_id"]),
+    )
+
+
+async def render(cfg: Config, db: DB, duel: aiosqlite.Row) -> tuple[str, InlineKeyboardMarkup | None]:
+    c, o = _name(duel["challenger_name"]), _name(duel["opponent_name"]) if duel["opponent_id"] else None
+    stake = duel["stake"]
+    if duel["status"] in ("pending", "declined", "expired"):
+        text = (
+            f"⚔️ <b>{c}</b> вызывает <b>{o or 'любого желающего'}</b> на дуэль!\n"
+            f"Ставка {stake} фишек · игр: {duel['games_total']} · угадываем масть игрока"
+        )
+        if duel["status"] == "pending":
+            text += f"\n⏳ Вызов действует {cfg.duel_accept_minutes} мин"
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="⚔️ Принять", callback_data=f"duel:acc:{duel['id']}"),
+                InlineKeyboardButton(text="Отказаться", callback_data=f"duel:dec:{duel['id']}"),
+            ]])
+            return text, kb
+        return text + ("\n❌ Вызов отклонён." if duel["status"] == "declined" else "\n⌛ Вызов никто не принял."), None
+
+    picks = await db.duel_picks(duel["id"])
+    by_game = {(p["user_id"], p["game"]): p for p in picks}
+    settled = await db.duel_settled_games(duel["id"])
+    sc, so = _scores(duel, picks)
+    lines = [f"⚔️ <b>{c} vs {o}</b> · ставка {stake} · счёт <b>{sc} : {so}</b>"]
+
+    def shown(uid: int, game: int, with_hit: bool) -> str:
+        pick = by_game.get((uid, game))
+        if not pick:
+            return "—" + (" ❌" if with_hit else "")
+        return suit_emoji(pick["suit"]) + ((" ✅" if pick["hit"] else " ❌") if with_hit else "")
+
+    current = await current_game(db, duel) if duel["status"] == "active" else None
+    for game in _games(duel):
+        cid, oid = duel["challenger_id"], duel["opponent_id"]
+        if game in settled:
+            lines.append(f"#N{game}: {c} {shown(cid, game, True)} · {o} {shown(oid, game, True)}")
+        elif await _seen(db, duel, game):
+            lines.append(f"#N{game}: игра идёт — {c} {shown(cid, game, False)} · {o} {shown(oid, game, False)}")
+        elif game == current:
+            mark = lambda uid: "✅ выбрал" if (uid, game) in by_game else "⏳ думает"  # noqa: E731
+            lines.append(f"<b>#N{game}:</b> {c} {mark(cid)} · {o} {mark(oid)}")
+    left = duel["games_total"] - len(settled)
+
+    if duel["status"] == "finished":
+        if duel["winner_id"] is None:
+            lines.append(f"\n🤝 <b>Ничья {sc} : {so}</b> — ставки возвращены.")
+        else:
+            winner = c if duel["winner_id"] == duel["challenger_id"] else o
+            lines.append(f"\n🏆 <b>{winner} победил {max(sc, so)} : {min(sc, so)}</b> и забирает {stake * 2} фишек!")
+        return "\n".join(lines), None
+
+    lines.append(f"\nОсталось игр: {left}. Выбор соперника скрыт до начала игры.")
+    kb = None
+    if current is not None:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=suit_emoji(s), callback_data=f"duel:p:{duel['id']}:{current}:{s}") for s in SUITS
+        ]])
+    return "\n".join(lines), kb
+
+
+async def refresh(cfg: Config, db: DB, bot: Bot, duel_id: int) -> None:
+    duel = await db.get_duel(duel_id)
+    if not duel or not duel["message_id"]:
+        return
+    text, kb = await render(cfg, db, duel)
+    try:
+        await bot.edit_message_text(text=text, chat_id=duel["chat_id"], message_id=duel["message_id"], reply_markup=kb)
+    except Exception as e:  # "message is not modified" и т.п.
+        log.debug("duel edit skipped: %s", e)
+
+
+async def _finish(cfg: Config, db: DB, bot: Bot, duel: aiosqlite.Row) -> None:
+    sc, so = _scores(duel, await db.duel_picks(duel["id"]))
+    winner = None if sc == so else (duel["challenger_id"] if sc > so else duel["opponent_id"])
+    if not await db.finish_duel(duel["id"], winner):
+        return
+    await refresh(cfg, db, bot, duel["id"])
+    if winner is None:
+        text = f"🤝 Дуэль {_name(duel['challenger_name'])} vs {_name(duel['opponent_name'])}: ничья {sc} : {so}."
+    else:
+        name = duel["challenger_name"] if winner == duel["challenger_id"] else duel["opponent_name"]
+        text = f"🏆 <b>{_name(name)}</b> побеждает в дуэли {max(sc, so)} : {min(sc, so)} и забирает {duel['stake'] * 2} фишек!"
+    try:
+        await bot.send_message(duel["chat_id"], text, reply_to_message_id=duel["message_id"])
+    except Exception:
+        log.exception("failed to announce duel result")
+
+
+async def on_game_started(cfg: Config, db: DB, bot: Bot, number: int) -> None:
+    """Пост игры появился: выбор на неё закрыт — раскрываем масти и переходим к следующей."""
+    for duel in await db.active_duels():
+        if number in _games(duel):
+            await refresh(cfg, db, bot, duel["id"])
+
+
+async def on_game_result(cfg: Config, db: DB, bot: Bot, result: GameResult) -> None:
+    for duel in await db.active_duels():
+        if result.number not in _games(duel):
+            continue
+        if await db.settle_duel_game(duel["id"], result.number, result.player_suits):
+            if len(await db.duel_settled_games(duel["id"])) >= duel["games_total"]:
+                await _finish(cfg, db, bot, duel)
+            else:
+                await refresh(cfg, db, bot, duel["id"])
+
+
+async def loop(cfg: Config, db: DB, bot: Bot) -> None:
+    while True:
+        try:
+            now = time.time()
+            for duel in await db.stale_pending_duels(int(now) - cfg.duel_accept_minutes * 60):
+                if await db.set_duel_status(duel["id"], "expired", only_from="pending"):
+                    await refresh(cfg, db, bot, duel["id"])
+            for duel in await db.active_duels():
+                if duel["started_at"] and now > duel["started_at"] + cfg.duel_max_hours * 3600:
+                    await _finish(cfg, db, bot, duel)
+        except Exception:
+            log.exception("duel loop failed")
+        await asyncio.sleep(20)
+
+
+def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) -> Router:
+    router = Router()
+
+    @router.message(Command("duel"))
+    async def cmd_duel(message: Message, command: CommandObject, bot: Bot) -> None:
+        if not await enabled(cfg, db):
+            await message.reply("Дуэли сейчас выключены.")
+            return
+        if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+            await message.reply("Дуэли проходят в общем чате. " + HOW_TO)
+            return
+        user = await ensure_user(message.from_user)
+        if not await subs.is_subscribed(bot, user["id"]):
+            text, kb = subs.prompt()
+            await message.reply(text, reply_markup=kb)
+            return
+        arg = (command.args or "").strip()
+        if not arg.isdigit():
+            await message.reply(HOW_TO)
+            return
+        stake = int(arg)
+        if not cfg.duel_min_stake <= stake <= cfg.duel_max_stake:
+            await message.reply(f"Ставка в дуэли — от {cfg.duel_min_stake} до {cfg.duel_max_stake} фишек.")
+            return
+        if user["balance"] < stake:
+            await message.reply(f"Недостаточно фишек: на балансе {user['balance']}.")
+            return
+        if await db.user_busy_in_duel(user["id"]):
+            await message.reply("У вас уже есть вызов или идёт дуэль — дождитесь её конца.")
+            return
+
+        opponent = None
+        target = message.reply_to_message.from_user if message.reply_to_message else None
+        if target and not target.is_bot and target.id != user["id"]:
+            opponent = await ensure_user(target)
+            if await db.user_busy_in_duel(opponent["id"]):
+                await message.reply(f"{_name(opponent['name'])} уже участвует в дуэли.")
+                return
+
+        duel_id = await db.create_duel(
+            message.chat.id, user["id"], opponent["id"] if opponent else None, stake, cfg.duel_games
+        )
+        text, kb = await render(cfg, db, await db.get_duel(duel_id))
+        sent = await message.answer(text, reply_markup=kb)
+        await db.set_duel_message(duel_id, sent.message_id)
+
+    @router.callback_query(F.data == "duel:help")
+    async def on_help(query: CallbackQuery) -> None:
+        await query.answer("Чтобы вызвать соперника, ответьте на его сообщение: /duel 500. "
+                           "Без ответа — открытый вызов для всех.", show_alert=True)
+
+    @router.callback_query(F.data.startswith("duel:acc:"))
+    async def on_accept(query: CallbackQuery, bot: Bot) -> None:
+        duel = await db.get_duel(int(query.data.split(":")[2]))
+        if not duel or duel["status"] != "pending":
+            await query.answer("Вызов уже неактуален.", show_alert=True)
+            return
+        if not await enabled(cfg, db):
+            await query.answer("Дуэли сейчас выключены.", show_alert=True)
+            return
+        user = await ensure_user(query.from_user)
+        if user["id"] == duel["challenger_id"]:
+            await query.answer("Нельзя принять свой же вызов.", show_alert=True)
+            return
+        if duel["opponent_id"] and user["id"] != duel["opponent_id"]:
+            await query.answer("Этот вызов не вам.", show_alert=True)
+            return
+        if not await subs.is_subscribed(bot, user["id"]):
+            await query.answer(subs.alert(), show_alert=True)
+            return
+        if not duel["opponent_id"] and await db.user_busy_in_duel(user["id"]):
+            await query.answer("У вас уже есть вызов или идёт дуэль.", show_alert=True)
+            return
+        last = await db.last_game()
+        if last is None:
+            await query.answer("Подождите первый пост канала.", show_alert=True)
+            return
+        if not await db.accept_duel(duel["id"], user["id"], last + 1):
+            await query.answer(f"Не хватает фишек: нужно {duel['stake']} у обоих.", show_alert=True)
+            return
+        await query.answer("⚔️ Дуэль началась! Выбирайте масть на ближайшую игру.")
+        await refresh(cfg, db, bot, duel["id"])
+
+    @router.callback_query(F.data.startswith("duel:dec:"))
+    async def on_decline(query: CallbackQuery, bot: Bot) -> None:
+        duel = await db.get_duel(int(query.data.split(":")[2]))
+        if not duel or duel["status"] != "pending":
+            await query.answer()
+            return
+        if query.from_user.id not in (duel["challenger_id"], duel["opponent_id"]):
+            await query.answer("Отказаться может только тот, кого вызвали.", show_alert=True)
+            return
+        await db.set_duel_status(duel["id"], "declined", only_from="pending")
+        await query.answer("Вызов отменён.")
+        await refresh(cfg, db, bot, duel["id"])
+
+    @router.callback_query(F.data.startswith("duel:p:"))
+    async def on_pick(query: CallbackQuery, bot: Bot) -> None:
+        _, _, duel_id, game, suit = query.data.split(":", 4)
+        duel = await db.get_duel(int(duel_id))
+        if not duel or duel["status"] != "active":
+            await query.answer("Дуэль уже закончилась.", show_alert=True)
+            return
+        if query.from_user.id not in (duel["challenger_id"], duel["opponent_id"]):
+            await query.answer("Это чужая дуэль — вызовите кого-нибудь сами: /duel 500", show_alert=True)
+            return
+        if await _seen(db, duel, int(game)):
+            await query.answer(f"Игра #N{game} уже началась — выбирайте на следующую.", show_alert=True)
+            await refresh(cfg, db, bot, duel["id"])
+            return
+        await db.set_duel_pick(duel["id"], int(game), query.from_user.id, suit)
+        await query.answer(f"Вы выбрали {suit_emoji(suit)} на #N{game} — соперник не видит до начала игры.")
+        await refresh(cfg, db, bot, duel["id"])
+
+    return router

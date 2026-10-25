@@ -9,7 +9,7 @@ from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from . import cards
+from . import cards, duels
 from . import tournament as tour
 from .config import Config
 from .db import DB
@@ -95,10 +95,34 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         )
         for f in cards.CARD_FREQUENCIES
     ])
+    duels_on = await duels.enabled(cfg, db)
+    confirm_on = await cards.confirm_enabled(cfg, db)
+    lines.append(f"Дуэли: {'✅ включены' if duels_on else '⛔️ выключены'} · "
+                 f"подтверждение ставок: {'✅' if confirm_on else '⛔️'}")
+    rows.append([
+        InlineKeyboardButton(text=f"⚔️ Дуэли: {'выключить' if duels_on else 'включить'}", callback_data="adm:duels"),
+        InlineKeyboardButton(text=f"🛡 Подтверждение: {'выкл' if confirm_on else 'вкл'}", callback_data="adm:confirm"),
+    ])
+    if duels_on:
+        rows.append([InlineKeyboardButton(text="📢 Анонс дуэлей в чат", callback_data="adm:duelnews")])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:refresh")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def duel_news_text(cfg: Config) -> str:
+    return (
+        "⚔️ <b>Новинка: дуэли!</b>\n\n"
+        "Вызовите любого игрока чата один на один:\n"
+        f"1. Ответьте на его сообщение командой <code>/duel 500</code> (ставка от {cfg.duel_min_stake} "
+        f"до {cfg.duel_max_stake} фишек). Без ответа — открытый вызов, принять может любой.\n"
+        f"2. Соперник жмёт «⚔️ Принять» — у обоих замораживается ставка.\n"
+        f"3. {cfg.duel_games} игр подряд каждый выбирает масть игрока кнопками под дуэлью. "
+        "Выбор соперника скрыт до начала игры.\n"
+        "4. Кто угадал больше — забирает обе ставки. Ничья — ставки возвращаются.\n\n"
+        "Дуэли — на обычных фишках, турнир они не трогают. Удачи! 🍀"
+    )
 
 
 async def gift_menu(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]:
@@ -191,7 +215,26 @@ def build_router(cfg: Config, db: DB) -> Router:
             await query.answer()
             await query.message.edit_text(text, reply_markup=kb)
             return
-        if action == "gd":
+        if action == "duels":
+            on = await duels.enabled(cfg, db)
+            await db.set_state("duels_enabled", "0" if on else "1")
+            note = "Дуэли выключены." if on else "Дуэли включены."
+        elif action == "confirm":
+            on = await cards.confirm_enabled(cfg, db)
+            await db.set_state("bet_confirm", "0" if on else "1")
+            note = "Подтверждение ставок выключено." if on else "Подтверждение ставок включено."
+        elif action == "duelnews":
+            main_chat = await db.get_state("main_chat")
+            if not main_chat:
+                note = "Чат ещё не выбран."
+            else:
+                msg = await bot.send_message(int(main_chat), duel_news_text(cfg))
+                try:
+                    await bot.pin_chat_message(int(main_chat), msg.message_id, disable_notification=True)
+                    note = "Анонс отправлен и закреплён."
+                except Exception:
+                    note = "Анонс отправлен."
+        elif action == "gd":
             note = await give_all(cfg, db, bot, parts[2], int(parts[3]), parts[4] == "1")
         elif action == "start":
             days = int(parts[2])

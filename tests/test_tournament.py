@@ -26,12 +26,13 @@ class FakeBot:
     async def me(self):
         return SimpleNamespace(username="suit_bot")
 
-    async def send_message(self, chat_id, text, reply_markup=None):
+    async def send_message(self, chat_id, text, reply_markup=None, **kwargs):
         self.sent.append((chat_id, text))
         return SimpleNamespace(message_id=len(self.sent))
 
     async def edit_message_text(self, text, chat_id, message_id, reply_markup=None):
         self.edits.append(text)
+        self.last_markup = reply_markup
 
 
 def run_with_db(tmp_path, body):

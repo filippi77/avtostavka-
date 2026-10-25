@@ -21,7 +21,7 @@ from aiogram.types import (
     User,
 )
 
-from . import admin, betting, cards, rating
+from . import admin, betting, cards, duels, rating
 from . import tournament as tour
 from .access import SubscriptionChecker
 from .betting import describe_pick
@@ -38,12 +38,17 @@ BTN_RATING = "📊 Рейтинг"
 BTN_TOURNAMENT = "🏆 Турнир"
 BTN_BUY = "⭐ Купить фишки"
 BTN_HELP = "❓ Как играть"
+BTN_SPIN = "🎰 Крутить"
+
+# Значения анимированного слота Telegram (1–64): три барабана по 4 символа.
+SLOT_SYMBOLS = ("BAR", "🍇", "🍋", "7️⃣")
 
 MENU = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text=BTN_BALANCE), KeyboardButton(text=BTN_BONUS)],
         [KeyboardButton(text=BTN_RATING), KeyboardButton(text=BTN_TOURNAMENT)],
-        [KeyboardButton(text=BTN_BUY), KeyboardButton(text=BTN_HELP)],
+        [KeyboardButton(text=BTN_SPIN), KeyboardButton(text=BTN_BUY)],
+        [KeyboardButton(text=BTN_HELP)],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -60,6 +65,8 @@ HELP = (
     "Ничья — ×{t:g}\n\n"
     "Можно и командой: <code>/bet 208 ♥ 50</code>, <code>/bet 208 игрок 50</code>, "
     "турнирная — <code>/tbet 208 ♥ 50</code>\n\n"
+    "{duel_line}"
+    "🎰 Раз в сутки — бесплатная крутилка в кабинете: 777 → +{jackpot} фишек.\n"
     "{bonus_line}\n"
     "Фишки — игровая валюта: их нельзя вывести или обменять на Stars."
 )
@@ -106,6 +113,11 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
             lines.append(f"🏆 Идёт турнир до {tour.format_ends(cfg, current['ends_at'])} — нажмите «{BTN_TOURNAMENT}»")
         wait = user["last_bonus"] + bonus_period - int(time.time())
         lines.append(f"🎁 Бонус: {'можно забрать!' if wait <= 0 else 'через ' + format_wait(wait)}")
+        spin_wait = user["last_spin"] + 86400 - int(time.time())
+        lines.append(f"🎰 Крутилка: {'можно крутить!' if spin_wait <= 0 else 'через ' + format_wait(spin_wait)}")
+        w, l, d = await db.duel_stats(user["id"])
+        if w or l or d:
+            lines.append(f"⚔️ Дуэли: побед {w} · поражений {l}" + (f" · ничьих {d}" if d else ""))
         bets = await db.user_open_bets(user["id"])
         if bets:
             lines.append("\nОткрытые ставки:")
@@ -116,11 +128,17 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
             ]
         return "\n".join(lines)
 
-    def help_text() -> str:
+    def help_text(duels_on: bool = True) -> str:
+        duel_line = (
+            f"⚔️ Дуэль: ответьте сопернику в чате <code>/duel 500</code> — {cfg.duel_games} игр, "
+            "кто угадал больше масть игрока, забирает обе ставки.\n"
+        ) if duels_on else ""
         period = "раз в неделю" if cfg.bonus_period_days == 7 else f"раз в {cfg.bonus_period_days} дн."
         return HELP.format(
             suit=cfg.payout_suit, p=cfg.payout_player, b=cfg.payout_banker, t=cfg.payout_tie,
             bonus_line=f"🎁 Бонус {cfg.bonus_amount} фишек {period}. Рейтинг — кнопка 📊 на карточке или в меню.",
+            jackpot=cfg.spin_prizes[0],
+            duel_line=duel_line,
         )
 
     # --- панель игрока --------------------------------------------------------
@@ -131,7 +149,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         # фишками создаётся автоматически (здесь, по команде или по кнопке в чате).
         user = await user_row(message.from_user)
         if command.args == "help":
-            await message.answer(help_text(), reply_markup=menu_for(message))
+            await message.answer(help_text(await duels.enabled(cfg, db)), reply_markup=menu_for(message))
             return
         await message.answer(
             f"👋 Привет! Это игра в прогнозы на масти. Кнопки внизу — ваш кабинет.\n\n{await cabinet_text(user)}",
@@ -145,7 +163,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
     @router.message(F.text == BTN_HELP)
     async def cmd_help(message: Message) -> None:
         await user_row(message.from_user)
-        await message.answer(help_text(), reply_markup=menu_for(message))
+        await message.answer(help_text(await duels.enabled(cfg, db)), reply_markup=menu_for(message))
 
     @router.message(Command("id"))
     async def cmd_id(message: Message) -> None:
@@ -170,6 +188,38 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         else:
             user = await db.get_user(message.from_user.id)
             await message.reply(f"🎁 +{cfg.bonus_amount} фишек! Баланс: {user['balance']}")
+
+    @router.message(Command("spin"))
+    @router.message(F.text == BTN_SPIN)
+    async def cmd_spin(message: Message, bot: Bot) -> None:
+        await user_row(message.from_user)
+        if message.chat.type != ChatType.PRIVATE:
+            me = await bot.me()
+            await message.reply(f"Крутилка — в личке с ботом: @{me.username}")
+            return
+        if not await require_sub(message, bot):
+            return
+        wait = await db.claim_spin(message.from_user.id)
+        if wait:
+            await message.answer(f"Сегодня уже крутили. Следующая попытка через {format_wait(wait)}.")
+            return
+        # Результат выбирает сам Telegram — ни бот, ни админ не могут на него повлиять.
+        dice = await bot.send_dice(message.chat.id, emoji="🎰")
+        reels = [SLOT_SYMBOLS[((dice.dice.value - 1) >> (2 * i)) & 3] for i in range(3)]
+        same = max(reels.count(x) for x in reels)
+        jackpot, triple, double, miss = cfg.spin_prizes
+        if reels == ["7️⃣"] * 3:
+            prize, title = jackpot, "🎉 ДЖЕКПОТ 7️⃣7️⃣7️⃣!"
+        elif same == 3:
+            prize, title = triple, f"🎉 Три {reels[0]}!"
+        elif same == 2:
+            prize, title = double, "👍 Две одинаковых!"
+        else:
+            prize, title = miss, "Не совпало, но держите утешительные"
+        await db.add_balance(message.from_user.id, prize)
+        await asyncio.sleep(2.5)  # дождаться, пока барабаны остановятся
+        user = await db.get_user(message.from_user.id)
+        await message.answer(f"{title} <b>+{prize} фишек</b>. Баланс: {user['balance']}\nСледующая попытка — через сутки.")
 
     @router.message(Command("top", "rating"))
     @router.message(F.text == BTN_RATING)
@@ -275,10 +325,12 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         await cards.close_for_game(cfg, db, bot, number)
         if first_post:
             await post_next_card(message, bot, number)
+            await duels.on_game_started(cfg, db, bot, number)
 
         result = parse_game(text)
         if result and result.finished:
             await settle(result, bot)
+            await duels.on_game_result(cfg, db, bot, result)
 
     async def post_next_card(message: Message, bot: Bot, number: int) -> None:
         main_chat = await db.get_state("main_chat")
@@ -447,8 +499,15 @@ async def main() -> None:
     dp.include_router(cards.build_router(
         cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
     ))
+    dp.include_router(duels.build_router(
+        cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
+    ))
     dp.include_router(build_router(cfg, db, subs))
-    tasks = [asyncio.create_task(refund_loop(cfg, db)), asyncio.create_task(cards.window_loop(cfg, db, bot))]
+    tasks = [
+        asyncio.create_task(refund_loop(cfg, db)),
+        asyncio.create_task(cards.window_loop(cfg, db, bot)),
+        asyncio.create_task(duels.loop(cfg, db, bot)),
+    ]
     if cfg.tournament_enabled:
         tasks.append(asyncio.create_task(tour.loop(cfg, db, bot)))
     try:

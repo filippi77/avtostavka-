@@ -78,6 +78,23 @@ class Config:
     # Куда объявлять начало и итоги, кроме чата, выбранного командой /setchat.
     tournament_chats: set[int] = field(default_factory=lambda: _ids(os.getenv("TOURNAMENT_CHATS", "")))
 
+    # Подтверждение ставки с карточки вторым нажатием (вкл/выкл ещё и в /admin).
+    bet_confirm: bool = os.getenv("BET_CONFIRM", "1") == "1"
+    bet_confirm_seconds: int = int(os.getenv("BET_CONFIRM_SECONDS", "15"))
+
+    # Дуэли: включаются и выключаются в /admin, здесь — значение по умолчанию.
+    duels_enabled: bool = os.getenv("DUELS_ENABLED", "1") == "1"
+    duel_games: int = int(os.getenv("DUEL_GAMES", "10"))
+    duel_min_stake: int = int(os.getenv("DUEL_MIN_STAKE", "50"))
+    duel_max_stake: int = int(os.getenv("DUEL_MAX_STAKE", "10000"))
+    duel_accept_minutes: int = int(os.getenv("DUEL_ACCEPT_MINUTES", "10"))
+    # Если канал пропустил номера игр, дуэль не зависнет: через столько часов
+    # она завершится с текущим счётом.
+    duel_max_hours: int = int(os.getenv("DUEL_MAX_HOURS", "3"))
+
+    # Крутилка 🎰 раз в сутки: выигрыш за 777, за три одинаковых, за две, за промах.
+    spin_prizes: tuple[int, ...] = tuple(int(x) for x in os.getenv("SPIN_PRIZES", "1000,300,50,10").split(","))
+
     def payout(self, kind: str, pick: str) -> float:
         if kind == "suit":
             return self.payout_suit

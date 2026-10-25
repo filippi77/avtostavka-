@@ -15,7 +15,7 @@ import time
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from . import betting, rating
+from . import betting, duels, rating
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
@@ -52,7 +52,7 @@ def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tour
     return "\n".join(lines)
 
 
-def card_keyboard(game: int, tournament_on: bool, bot_username: str | None) -> InlineKeyboardMarkup:
+def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=suit_emoji(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
         [
@@ -67,8 +67,10 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None) -> I
             InlineKeyboardButton(text="Обычные фишки", callback_data="w:main"),
         ])
     last_row = [InlineKeyboardButton(text="📊 Рейтинг", callback_data="rate")]
+    if duels_on:
+        last_row.append(InlineKeyboardButton(text="⚔️ Дуэль", callback_data="duel:help"))
     if bot_username:
-        last_row.append(InlineKeyboardButton(text="👤 Мой кабинет", url=f"https://t.me/{bot_username}?start=menu"))
+        last_row.append(InlineKeyboardButton(text="👤 Кабинет", url=f"https://t.me/{bot_username}?start=menu"))
     rows.append(last_row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -89,7 +91,7 @@ async def maybe_post(cfg: Config, db: DB, bot: Bot, seen_game: int, chat_id: int
         return
     on = await _tournament_on(cfg, db)
     me = await bot.me()
-    msg = await bot.send_message(chat_id, card_text(cfg, game, {}, False, on), reply_markup=card_keyboard(game, on, me.username))
+    msg = await bot.send_message(chat_id, card_text(cfg, game, {}, False, on), reply_markup=card_keyboard(game, on, me.username, await duels.enabled(cfg, db)))
     await db.save_card(game, chat_id, msg.message_id)
 
 
@@ -103,7 +105,7 @@ async def refresh(cfg: Config, db: DB, bot: Bot, game: int, chat_id: int, closed
     try:
         await bot.edit_message_text(
             text=card_text(cfg, game, counts, closed, on), chat_id=chat_id, message_id=card["message_id"],
-            reply_markup=None if closed else card_keyboard(game, on, me.username),
+            reply_markup=None if closed else card_keyboard(game, on, me.username, await duels.enabled(cfg, db)),
         )
     except Exception as e:  # "message is not modified" и т.п. — не страшно
         log.debug("card edit skipped: %s", e)
@@ -129,9 +131,15 @@ async def window_loop(cfg: Config, db: DB, bot: Bot) -> None:
         await asyncio.sleep(2)
 
 
+async def confirm_enabled(cfg: Config, db: DB) -> bool:
+    return await db.get_state("bet_confirm", "1" if cfg.bet_confirm else "0") == "1"
+
+
 def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) -> Router:
     router = Router()
     rating_pressed: dict[int, float] = {}
+    # Ставка с карточки, ждущая второго нажатия: (игрок, чат, данные кнопки) -> до какого времени.
+    pending: dict[tuple[int, int, str], float] = {}
 
     @router.callback_query(F.data == "rate")
     async def on_rating(query: CallbackQuery) -> None:
@@ -167,6 +175,24 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             return
         tournament_bet = user["pref_wallet"] == "tour" and await _tournament_on(cfg, db)
         chat_id = query.message.chat.id if query.message else query.from_user.id
+
+        if await confirm_enabled(cfg, db):
+            # Первое нажатие показывает, на что ставка, второе — подтверждает.
+            key, now = (user["id"], chat_id, query.data), time.time()
+            if pending.pop(key, 0) < now:
+                for k in [k for k in pending if k[0] == user["id"] or pending[k] < now]:
+                    pending.pop(k)
+                pending[key] = now + cfg.bet_confirm_seconds
+                coef = cfg.payout(kind, pick)
+                stake = user["pref_stake"]
+                button = suit_emoji(pick) if kind == "suit" else betting.SIDE_NAMES[pick].capitalize()
+                await query.answer(
+                    f"Ставка на #N{game}\n{betting.describe_pick(kind, pick)} · {stake} "
+                    f"{'турнирных ' if tournament_bet else ''}фишек · ×{coef:g} → выигрыш {int(stake * coef)}\n\n"
+                    f"Нажмите «{button}» ещё раз в течение {cfg.bet_confirm_seconds} сек, чтобы подтвердить.",
+                    show_alert=True,
+                )
+                return
         try:
             text = await betting.place(
                 cfg, db, user["id"], chat_id, int(game), kind, pick, user["pref_stake"], tournament_bet

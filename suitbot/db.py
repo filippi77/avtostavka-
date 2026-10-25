@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at  INTEGER NOT NULL DEFAULT 0,
     -- что выбрано на кнопках карточки игры: сумма и кошелёк (main | tour)
     pref_stake  INTEGER NOT NULL DEFAULT 50,
-    pref_wallet TEXT NOT NULL DEFAULT 'tour'
+    pref_wallet TEXT NOT NULL DEFAULT 'tour',
+    last_spin   INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS bets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +67,35 @@ CREATE TABLE IF NOT EXISTS cards (
     closed      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (game, chat_id)
 );
+-- Дуэли: двое угадывают масть игрока в games_total играх подряд начиная с start_game.
+CREATE TABLE IF NOT EXISTS duels (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id       INTEGER NOT NULL,
+    message_id    INTEGER,
+    challenger_id INTEGER NOT NULL REFERENCES users(id),
+    opponent_id   INTEGER REFERENCES users(id),  -- NULL: открытый вызов, принять может любой
+    stake         INTEGER NOT NULL,
+    games_total   INTEGER NOT NULL,
+    start_game    INTEGER,
+    status        TEXT NOT NULL DEFAULT 'pending',  -- pending | active | finished | declined | expired
+    winner_id     INTEGER,
+    created_at    INTEGER NOT NULL,
+    started_at    INTEGER
+);
+CREATE TABLE IF NOT EXISTS duel_picks (
+    duel_id     INTEGER NOT NULL REFERENCES duels(id),
+    game        INTEGER NOT NULL,
+    user_id     INTEGER NOT NULL,
+    suit        TEXT NOT NULL,
+    hit         INTEGER,  -- NULL пока игра не рассчитана
+    PRIMARY KEY (duel_id, game, user_id)
+);
+-- Рассчитанные игры дуэли (в том числе те, где кто-то не выбрал масть).
+CREATE TABLE IF NOT EXISTS duel_games (
+    duel_id     INTEGER NOT NULL REFERENCES duels(id),
+    game        INTEGER NOT NULL,
+    PRIMARY KEY (duel_id, game)
+);
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
@@ -86,7 +116,18 @@ class DB:
         self.conn = await aiosqlite.connect(self.path)
         self.conn.row_factory = aiosqlite.Row
         await self.conn.executescript(SCHEMA)
+        await self._migrate()
         await self.conn.commit()
+
+    async def _migrate(self) -> None:
+        """Добавляет столбцы, появившиеся в новых версиях, в базу, созданную старой."""
+        added = {"users": {"last_spin": "INTEGER NOT NULL DEFAULT 0"}}
+        for table, columns in added.items():
+            cur = await self.conn.execute(f"PRAGMA table_info({table})")
+            existing = {row["name"] for row in await cur.fetchall()}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    await self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
     async def close(self) -> None:
         await self.conn.close()
@@ -124,6 +165,18 @@ class DB:
             return 0
         user = await self.get_user(user_id)
         return user["last_bonus"] + period - now
+
+    async def claim_spin(self, user_id: int, period: int = 86400) -> int:
+        """Отмечает попытку крутилки и возвращает 0, либо возвращает секунды до следующей."""
+        now = int(time.time())
+        cur = await self.conn.execute(
+            "UPDATE users SET last_spin = ? WHERE id = ? AND last_spin <= ?", (now, user_id, now - period)
+        )
+        await self.conn.commit()
+        if cur.rowcount:
+            return 0
+        user = await self.get_user(user_id)
+        return user["last_spin"] + period - now
 
     async def users_count(self) -> int:
         cur = await self.conn.execute("SELECT COUNT(*) AS n FROM users")
@@ -421,3 +474,134 @@ class DB:
             "SELECT DISTINCT chat_id FROM bets WHERE tournament_id = ? AND chat_id < 0", (tournament_id,)
         )
         return [row["chat_id"] for row in await cur.fetchall()]
+
+    # --- дуэли --------------------------------------------------------------
+
+    async def create_duel(self, chat_id: int, challenger_id: int, opponent_id: int | None,
+                          stake: int, games_total: int) -> int:
+        cur = await self.conn.execute(
+            "INSERT INTO duels(chat_id, challenger_id, opponent_id, stake, games_total, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (chat_id, challenger_id, opponent_id, stake, games_total, int(time.time())),
+        )
+        await self.conn.commit()
+        return cur.lastrowid
+
+    async def set_duel_message(self, duel_id: int, message_id: int) -> None:
+        await self.conn.execute("UPDATE duels SET message_id = ? WHERE id = ?", (message_id, duel_id))
+        await self.conn.commit()
+
+    async def get_duel(self, duel_id: int) -> aiosqlite.Row | None:
+        cur = await self.conn.execute(
+            "SELECT d.*, c.name AS challenger_name, o.name AS opponent_name FROM duels d "
+            "JOIN users c ON c.id = d.challenger_id LEFT JOIN users o ON o.id = d.opponent_id WHERE d.id = ?",
+            (duel_id,),
+        )
+        return await cur.fetchone()
+
+    async def user_busy_in_duel(self, user_id: int) -> bool:
+        cur = await self.conn.execute(
+            "SELECT 1 FROM duels WHERE status IN ('pending', 'active') AND (challenger_id = ? OR opponent_id = ?)",
+            (user_id, user_id),
+        )
+        return await cur.fetchone() is not None
+
+    async def accept_duel(self, duel_id: int, opponent_id: int, start_game: int) -> bool:
+        """Списывает ставки с обоих и запускает дуэль. False — если у кого-то не хватает фишек."""
+        duel = await self.get_duel(duel_id)
+        if not duel or duel["status"] != "pending":
+            return False
+        for uid in (duel["challenger_id"], opponent_id):
+            cur = await self.conn.execute(
+                "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?", (duel["stake"], uid, duel["stake"])
+            )
+            if not cur.rowcount:
+                await self.conn.rollback()
+                return False
+        await self.conn.execute(
+            "UPDATE duels SET status = 'active', opponent_id = ?, start_game = ?, started_at = ? WHERE id = ?",
+            (opponent_id, start_game, int(time.time()), duel_id),
+        )
+        await self.conn.commit()
+        return True
+
+    async def set_duel_status(self, duel_id: int, status: str, only_from: str) -> bool:
+        cur = await self.conn.execute(
+            "UPDATE duels SET status = ? WHERE id = ? AND status = ?", (status, duel_id, only_from)
+        )
+        await self.conn.commit()
+        return bool(cur.rowcount)
+
+    async def active_duels(self) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute("SELECT id FROM duels WHERE status = 'active'")
+        return [await self.get_duel(row["id"]) for row in await cur.fetchall()]
+
+    async def stale_pending_duels(self, older_than: int) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute(
+            "SELECT id FROM duels WHERE status = 'pending' AND created_at < ?", (older_than,)
+        )
+        return [await self.get_duel(row["id"]) for row in await cur.fetchall()]
+
+    async def set_duel_pick(self, duel_id: int, game: int, user_id: int, suit: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO duel_picks(duel_id, game, user_id, suit) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(duel_id, game, user_id) DO UPDATE SET suit = excluded.suit WHERE duel_picks.hit IS NULL",
+            (duel_id, game, user_id, suit),
+        )
+        await self.conn.commit()
+
+    async def duel_picks(self, duel_id: int) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute("SELECT * FROM duel_picks WHERE duel_id = ?", (duel_id,))
+        return await cur.fetchall()
+
+    async def settle_duel_game(self, duel_id: int, game: int, player_suits: set[str]) -> bool:
+        """Отмечает угадавших в игре. False — если игра уже рассчитана."""
+        cur = await self.conn.execute(
+            "INSERT OR IGNORE INTO duel_games(duel_id, game) VALUES (?, ?)", (duel_id, game)
+        )
+        if not cur.rowcount:
+            await self.conn.commit()
+            return False
+        for pick in await self.duel_picks(duel_id):
+            if pick["game"] == game:
+                await self.conn.execute(
+                    "UPDATE duel_picks SET hit = ? WHERE duel_id = ? AND game = ? AND user_id = ?",
+                    (int(pick["suit"] in player_suits), duel_id, game, pick["user_id"]),
+                )
+        await self.conn.commit()
+        return True
+
+    async def duel_settled_games(self, duel_id: int) -> set[int]:
+        cur = await self.conn.execute("SELECT game FROM duel_games WHERE duel_id = ?", (duel_id,))
+        return {row["game"] for row in await cur.fetchall()}
+
+    async def finish_duel(self, duel_id: int, winner_id: int | None) -> bool:
+        """Завершает дуэль: победителю весь банк, при ничьей ставки возвращаются."""
+        duel = await self.get_duel(duel_id)
+        cur = await self.conn.execute(
+            "UPDATE duels SET status = 'finished', winner_id = ? WHERE id = ? AND status = 'active'",
+            (winner_id, duel_id),
+        )
+        if not cur.rowcount:
+            await self.conn.commit()
+            return False
+        if winner_id is None:
+            for uid in (duel["challenger_id"], duel["opponent_id"]):
+                await self.conn.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (duel["stake"], uid))
+        else:
+            await self.conn.execute(
+                "UPDATE users SET balance = balance + ? WHERE id = ?", (duel["stake"] * 2, winner_id)
+            )
+        await self.conn.commit()
+        return True
+
+    async def duel_stats(self, user_id: int) -> tuple[int, int, int]:
+        """(побед, поражений, ничьих) в завершённых дуэлях."""
+        cur = await self.conn.execute(
+            "SELECT SUM(winner_id = ?) AS w, SUM(winner_id IS NOT NULL AND winner_id != ?) AS l, "
+            "SUM(winner_id IS NULL) AS d FROM duels "
+            "WHERE status = 'finished' AND (challenger_id = ? OR opponent_id = ?)",
+            (user_id, user_id, user_id, user_id),
+        )
+        row = await cur.fetchone()
+        return row["w"] or 0, row["l"] or 0, row["d"] or 0
