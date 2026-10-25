@@ -147,7 +147,9 @@ G21_MAX_ODDS_DIFF = 0.25  # КФ на сайте отличается от си�
 G21_FIND_TIMEOUT = 40  # сек ждём, пока игра появится в поиске
 # Сигнал старше этого (например, после перезапуска бота или падения Opera) не ставим:
 # игра/матч уже прошли. Теннис по-прежнему без ограничения (MAX_SIGNAL_AGE).
-G21_SIGNAL_MAX_AGE = 90
+# У 21 очко запас большой: часы компьютера могут отставать/спешить, а устаревшие
+# игры и так отсеиваются по номерам (g21_stale).
+G21_SIGNAL_MAX_AGE = 10 * 60
 PEN_SIGNAL_MAX_AGE = 4 * 60
 
 GAMES = {"tennis": "🏓 Теннис", "penalty": "⚽ Пенальти", "g21": "🃏 21 очко"}
@@ -1974,6 +1976,18 @@ def g21_channel():
 _g21_seen = {"bet": 0, "done": 0}
 
 
+_skips = {"n": 0, "last_sent": 0.0}
+
+
+def note_skip(text):
+  """Пропуск устаревшего сигнала: в лог всегда, в Telegram — сводкой не чаще раза в 5 мин."""
+  print("⏭", text)
+  _skips["n"] += 1
+  if time.time() - _skips["last_sent"] >= 300:
+    n, _skips["n"], _skips["last_sent"] = _skips["n"], 0, time.time()
+    send(f"⏭ Пропущено устаревших сигналов: {n} (последний: {html.escape(text)})")
+
+
 def g21_stale(no):
   """Причина пропуска, если игра no уже прошла (пришли сигналы на следующие игры)."""
   if _g21_seen["done"] >= no:
@@ -2781,14 +2795,14 @@ def job_bet(page, job):
   max_age = {"g21": G21_SIGNAL_MAX_AGE, "penalty": PEN_SIGNAL_MAX_AGE}.get(game)
   age = time.time() - float(job.get("received_at") or time.time())
   if max_age and age > max_age:
-    print(f"⏭ {describe(sig)}: сигнал устарел ({int(age)} с) — пропуск")
-    return  # без браузера и без сообщения: после перезапуска таких десятки
+    note_skip(f"{describe(sig)}: сигнал устарел ({int(age // 60)} мин {int(age % 60)} с)")
+    return  # без браузера: после перезапуска таких десятки
 
   if game == "g21":
     stale = g21_stale(sig.get("match_no") or 0)
     if stale:
-      print(f"⏭ {describe(sig)}: {stale}")
-      return  # без браузера и сообщения — очередь сразу идёт дальше
+      note_skip(f"{describe(sig)}: {stale}")
+      return  # без браузера — очередь сразу идёт дальше
 
   reject_reason = None
   with lock:
