@@ -1966,7 +1966,10 @@ def g21_open_game(page, no):
     problem = site_problem(page)
     if problem:
       raise SiteDown(f"{cur_site()}: {problem}")
-    for _ in range(5):
+    # Поиск грузится несколько секунд (сначала серые заглушки) — ждём на той же
+    # странице и не перезагружаем: перезагрузка сбрасывает загрузку списка.
+    loaded_at = time.time()
+    while time.time() < deadline:
       page.wait_for_timeout(1000)
       res = page.evaluate(G21_FIND_JS, [G21_GAME_TITLE, no])
       if res and res.get("found"):
@@ -1985,11 +1988,29 @@ def g21_open_game(page, no):
         for old_no in [k for k in _g21_urls if k < no - 20]:
           _g21_urls.pop(old_no, None)
         return page.url
-      last_numbers = (res or {}).get("numbers") or last_numbers
-    if last_numbers and min(last_numbers) > no:
-      raise SkipSignal(f"игра #{no} уже прошла (в поиске с #{min(last_numbers)})")
-    if time.time() > deadline:
-      seen = ", ".join(str(x) for x in sorted(last_numbers)[:6]) or "нет игр"
+      numbers = (res or {}).get("numbers") or []
+      if numbers:
+        last_numbers = numbers
+        if min(numbers) > no:
+          raise SkipSignal(f"игра #{no} уже прошла (в поиске с #{min(numbers)})")
+      waited = time.time() - loaded_at
+      # список есть, а нашей игры ещё нет — обновляем раз в 15 с;
+      # список так и не появился — перезагружаем через 25 с
+      if (numbers and waited > 15) or waited > 25:
+        break
+      if int(waited) % 4 == 3:
+        try:
+          page.mouse.wheel(0, 400)  # подгрузить ленивые блоки
+        except Exception:
+          pass
+    if time.time() >= deadline:
+      seen = ", ".join(str(x) for x in sorted(last_numbers)[:6])
+      if not seen:
+        try:
+          body = page.evaluate("() => (document.body.innerText || '').slice(0, 300)")
+        except Exception:
+          body = ""
+        seen = "нет игр; на странице: " + re.sub(r"\s+", " ", body)[:200]
       raise SkipSignal(f"игра «{G21_GAME_TITLE}» #{no} не найдена в поиске (видно: {seen})")
 
 
