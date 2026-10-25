@@ -18,6 +18,7 @@ from playwright.sync_api import sync_playwright
 from telebot import types
 
 # ================== НАСТРОЙКИ ==================
+BOT_VERSION = "25.10 23:00"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -3258,6 +3259,8 @@ def _process_pen_message(msg, is_edit=False):
   ev = parse_pen_post(msg.text or msg.caption or "")
   if ev is None:
     return
+  print(f"Пенальти: {ev['kind']} {ev.get('sig_id') or ev.get('signal_id')}"
+        f" (игра {'ВКЛ' if game_on('penalty') else 'ВЫКЛ'})")
   roll_day()
   if ev["kind"] == "signal":
     if not game_on("penalty") or not state["running"]:
@@ -3535,7 +3538,8 @@ def status_text():
   ) + f" · ⚽ {PEN_CHANNEL}"
 
   return (
-      " <b>Автоставка DB Bet (теннис + пенальти + 21 очко)</b>\n"
+      " <b>Автоставка DB Bet (теннис + пенальти + 21 очко)</b>"
+      + f" · версия {BOT_VERSION}\n"
       + "Статус: "
       + st_running
       + "\n"
@@ -4371,7 +4375,7 @@ if __name__ == "__main__":
   try:
     hello = bot.send_message(
         ADMIN_ID,
-        " Автоставка запущена (автопауза отключена)"
+        f" Автоставка запущена, версия {BOT_VERSION} (автопауза отключена)"
         + (f"\n⏭ Старых сигналов из очереди убрано: {len(old_signals)}" if old_signals else "")
         + "\nСигналы, отправленные до запуска, пропускаются — жду новые."
         + "\n\n" + status_text(),
