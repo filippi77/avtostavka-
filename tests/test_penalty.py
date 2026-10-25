@@ -37,3 +37,41 @@ def test_parse_pick():
     assert parse_pick("тм") == ("total", "U")
     assert parse_pick("♥") is None
     assert parse_post("Ставлю на П1") is None
+
+
+def test_timer_closes_next_series(tmp_path):
+    import asyncio
+    import time
+    from dataclasses import replace
+
+    from suitbot import bot as botmod
+    from suitbot.config import Config
+    from test_tournament import FakeBot, run_with_db
+
+    cfg = replace(Config(token="x"), game="penalty", game_number_wrap=288)
+
+    async def body(db):
+        bot = FakeBot()
+        await db.save_penalty_game(43, "Арсенал", "Бавария", {"1": 1.97, "2": 1.83}, None)
+        await db.set_state("pen_close", f"43:{int(time.time()) + 60}")
+
+        async def one_tick(*_):
+            raise asyncio.CancelledError
+
+        real_sleep = botmod.asyncio.sleep
+        botmod.asyncio.sleep = one_tick
+        try:
+            for _ in range(2):
+                try:
+                    await botmod.penalty_close_loop(cfg, db, bot)
+                except asyncio.CancelledError:
+                    pass
+                if _ == 0:
+                    assert not await db.game_seen_since(43, 0)  # время ещё не вышло
+                    await db.set_state("pen_close", f"43:{int(time.time()) - 1}")
+        finally:
+            botmod.asyncio.sleep = real_sleep
+        assert await db.game_seen_since(43, 0)
+        assert await db.get_state("pen_close") == ""
+
+    run_with_db(tmp_path, body)

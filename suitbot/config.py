@@ -81,9 +81,12 @@ class Config:
     # Какую игру ведёт бот: baccarat (масти по постам статистики баккары)
     # или penalty (П1/П2 и тотал по постам FIFA Penalty).
     game: str = os.getenv("GAME", "baccarat")
-    # Пенальти: считать, что игра N началась, как только закончилась N-1.
-    # Так ставки закрываются заранее, даже если канал не успел обновить счёт.
-    penalty_close_on_prev_finish: bool = os.getenv("PENALTY_CLOSE_ON_PREV_FINISH", "1") == "1"
+    # Пенальти: когда закрывать ставки на серию N, если канал ещё не обновил её счёт.
+    # Между сериями пауза ~4 минуты, поэтому по умолчанию — через PENALTY_START_DELAY
+    # секунд после конца серии N-1 (с запасом до старта). PENALTY_CLOSE_ON_PREV_FINISH=1 —
+    # закрывать сразу после конца предыдущей серии.
+    penalty_close_on_prev_finish: bool = os.getenv("PENALTY_CLOSE_ON_PREV_FINISH", "0") == "1"
+    penalty_start_delay: int = int(os.getenv("PENALTY_START_DELAY", "180"))
 
     # Язык для игроков по умолчанию (ru | uz); меняется в /admin.
     lang: str = os.getenv("BOT_LANG", "ru")

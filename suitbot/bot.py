@@ -291,13 +291,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         return int(time.time()) - cfg.bet_ttl_hours * 3600
 
     async def mark_started(number: int, bot: Bot) -> bool:
-        """Игра началась: закрываем ставки. True — если узнали об этом впервые."""
-        first = not await db.game_seen_since(number, since())
-        await db.mark_game_seen(number, fresh_after=since(), wrap=cfg.game_number_wrap)
-        await cards.close_for_game(cfg, db, bot, number)
-        if first:
-            await duels.on_game_started(cfg, db, bot, number)
-        return first
+        return await start_game(cfg, db, bot, number)
 
     async def handle_result_post(message: Message, bot: Bot) -> None:
         text = message.text or message.caption
@@ -341,8 +335,12 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
                        a=post.score[0], b=post.score[1])
             await settle(post.number, header, lambda kind, pick: penalty.bet_wins(kind, pick, post), bot)
             await duels.on_game_result(cfg, db, bot, post.number, {post.winner} if post.winner else set())
+            next_game = post.number % cfg.game_number_wrap + 1
             if cfg.penalty_close_on_prev_finish:
-                await mark_started(post.number + 1, bot)
+                await mark_started(next_game, bot)
+            elif cfg.penalty_start_delay:
+                # Следующая серия начнётся минуты через четыре — закроем ставки на неё заранее.
+                await db.set_state("pen_close", f"{next_game}:{int(time.time()) + cfg.penalty_start_delay}")
 
     async def post_next_card(message: Message, bot: Bot, number: int) -> None:
         main_chat = await db.get_state("main_chat")
@@ -462,6 +460,32 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
     return router
 
 
+async def start_game(cfg: Config, db: DB, bot: Bot, number: int) -> bool:
+    """Игра началась: закрываем ставки на неё. True — если узнали об этом впервые."""
+    since = int(time.time()) - cfg.bet_ttl_hours * 3600
+    first = not await db.game_seen_since(number, since)
+    await db.mark_game_seen(number, fresh_after=since, wrap=cfg.game_number_wrap)
+    await cards.close_for_game(cfg, db, bot, number)
+    if first:
+        await duels.on_game_started(cfg, db, bot, number)
+    return first
+
+
+async def penalty_close_loop(cfg: Config, db: DB, bot: Bot) -> None:
+    """Пенальти: закрывает ставки на следующую серию по таймеру после конца предыдущей."""
+    while True:
+        try:
+            planned = await db.get_state("pen_close", "")
+            if planned:
+                number, at = map(int, planned.split(":"))
+                if time.time() >= at:
+                    await db.set_state("pen_close", "")
+                    await start_game(cfg, db, bot, number)
+        except Exception:
+            log.exception("penalty close loop failed")
+        await asyncio.sleep(2)
+
+
 async def refund_loop(cfg: Config, db: DB) -> None:
     while True:
         await asyncio.sleep(600)
@@ -513,6 +537,8 @@ async def main() -> None:
         asyncio.create_task(cards.window_loop(cfg, db, bot)),
         asyncio.create_task(duels.loop(cfg, db, bot)),
     ]
+    if cfg.game == "penalty":
+        tasks.append(asyncio.create_task(penalty_close_loop(cfg, db, bot)))
     if cfg.tournament_enabled:
         tasks.append(asyncio.create_task(tour.loop(cfg, db, bot)))
     try:
