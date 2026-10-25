@@ -23,9 +23,12 @@ SECRETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autobet
 
 
 def _load_secrets(path):
+  if not os.path.exists(path) and os.path.exists(path + ".txt"):
+    path += ".txt"  # Блокнот/браузер мог дописать .txt
   if not os.path.exists(path):
     return
-  with open(path, encoding="utf-8") as fh:
+  # utf-8-sig: Блокнот Windows ставит в начало файла невидимый BOM
+  with open(path, encoding="utf-8-sig") as fh:
     for line in fh:
       line = line.strip()
       if line and not line.startswith("#") and "=" in line:
