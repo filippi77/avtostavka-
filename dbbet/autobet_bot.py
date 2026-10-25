@@ -126,8 +126,27 @@ PEN_TEAMS = {
     "вильярреал": ["villarreal"],
 }
 
-GAMES = {"tennis": "🏓 Теннис", "penalty": "⚽ Пенальти"}
-MARKETS = ("ТМ", "ТБ", "П1", "П2")
+# ----- 🃏 21 очко -----
+# Канал «21 очко Авто» с сигналами AUTO21 (формат — SIGNAL21.md). Можно задать
+# здесь, в autobet.env (AUTOBET_G21_CHANNEL) или кнопкой, когда придёт первый пост.
+G21_CHANNEL = int(os.environ.get("AUTOBET_G21_CHANNEL", "0") or 0)
+G21_SEARCH_PATH = "/ru/search-events?searchtext=21+ochko"
+G21_GAME_TITLE = "21 Очко"
+# код исхода в сигнале → (рынок в боте, заголовок блока на сайте, слово в купоне)
+G21_OUTCOMES = {
+    "G": ("ГОЛД", 'Будет "золотое очко"', "золотое очко"),
+    "R": ("РАЗДАЧА", "Игра завершится на раздаче", "раздаче"),
+}
+# лесенки догона: последний шаг — максимум сайта (если лимит в купоне меньше — ставим лимит)
+G21_LADDERS = {
+    "ГОЛД": [25, 40, 60, 85, 130, 190, 290, 430, 650, 970],
+    "РАЗДАЧА": [95, 140, 215, 320, 480, 720, 1080, 1620, 2430, 3650],
+}
+G21_MAX_ODDS_DIFF = 0.25  # КФ на сайте отличается от сигнала больше чем на 25% — не ставим
+G21_FIND_TIMEOUT = 60  # сек ждём, пока игра появится в поиске
+
+GAMES = {"tennis": "🏓 Теннис", "penalty": "⚽ Пенальти", "g21": "🃏 21 очко"}
+MARKETS = ("ТМ", "ТБ", "П1", "П2", "ГОЛД", "РАЗДАЧА")
 # ===============================================
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML", threaded=False)
@@ -160,7 +179,8 @@ def default_state():
       "max_steps": MAX_STEPS,
       "min_odds": MIN_ODDS,
       "daily_loss_limit": DAILY_LOSS_LIMIT,
-      "games": {"tennis": True, "penalty": True},
+      "games": {"tennis": True, "penalty": True, "g21": True},
+      "g21_channel": None,
       "pen_base_stake": PEN_BASE_STAKE,
       "pen_multiplier": PEN_MULTIPLIER,
       "pen_max_steps": PEN_MAX_STEPS,
@@ -188,7 +208,7 @@ def validate_payload(p):
         or type(p.get("set")) is not int
         or not 1 <= p["set"] <= 7
         or type(p.get("step")) is not int
-        or not 1 <= p["step"] <= 7
+        or not 1 <= p["step"] <= 20
         or p.get("market") not in MARKETS
         or isinstance(p.get("line"), bool)
         or not isinstance(p.get("line"), (int, float))
@@ -558,13 +578,24 @@ def game_on(game):
   return bool(state.get("games", {}).get(game, True))
 
 
-def get_steps_for(game):
+def g21_ladder(market):
+  return G21_LADDERS.get(market) or []
+
+
+def get_steps_for(game, market=None):
+  if game == "g21":
+    if market:
+      return len(g21_ladder(market))
+    return max(len(x) for x in G21_LADDERS.values())
   if game == "penalty":
     return int(state.get("pen_max_steps", PEN_MAX_STEPS))
   return get_max_steps()
 
 
-def stake_for(step, game="tennis"):
+def stake_for(step, game="tennis", market=None):
+  if game == "g21":
+    ladder = g21_ladder(market)
+    return float(ladder[step - 1]) if 1 <= step <= len(ladder) else 0.0
   if game == "penalty":
     base = float(state.get("pen_base_stake", PEN_BASE_STAKE))
     mult = float(state.get("pen_multiplier", PEN_MULTIPLIER))
@@ -579,8 +610,14 @@ def pen_ladder_text():
   )
 
 
+def g21_ladder_text(market):
+  return " ".join(str(x) for x in g21_ladder(market))
+
+
 def describe(b):
   """Короткое описание ставки/сигнала для сообщений."""
+  if game_of(b) == "g21":
+    return f"🃏 21 очко #{b.get('match_no', '?')} · {b['market']}"
   if game_of(b) == "penalty":
     team = b.get("team") or ""
     return (
@@ -927,6 +964,9 @@ def clear_coupon(page):
 
 
 def prepare_bet(page, sig, stake):
+  _filled["stake"] = None
+  if game_of(sig) == "g21":
+    return prepare_21_bet(page, sig, stake)
   if game_of(sig) == "penalty":
     return prepare_pen_bet(page, sig, stake)
   if not sig["set"]:
@@ -1833,6 +1873,266 @@ def prepare_pen_bet_matchpage(page, sig, stake):
   return odds
 
 
+# ---------- 🃏 21 очко: игра по номеру, «Да» в нужном рынке ----------
+
+# сумма, которую prepare_*_bet реально вписала в купон (None — как просили)
+_filled = {"stake": None}
+
+
+def take_filled_stake(stake):
+  filled, _filled["stake"] = _filled["stake"], None
+  return stake if filled is None else filled
+
+
+G21_FIND_JS = """([title, no]) => {
+  const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+  let best = null, bestLen = 1e9, numbers = [];
+  for (const el of document.querySelectorAll('a, div, li, article, section')) {
+    const text = el.innerText || '';
+    if (text.length > 600) continue;  // большой блок — это список, а не карточка
+    const lines = text.split('\\n').map(norm).filter(Boolean);
+    const titles = lines.filter(l => /^21 (очко|классика)$/i.test(l));
+    if (titles.length !== 1 || titles[0].toLowerCase() !== title.toLowerCase()) continue;
+    const nums = lines.filter(l => /^\\d{1,6}$/.test(l)).map(Number);
+    numbers.push(...nums);
+    if (nums.includes(no) && text.length < bestLen) { best = el; bestLen = text.length; }
+  }
+  if (!best) return {found: false, numbers: Array.from(new Set(numbers))};
+  best.setAttribute('data-ab-g21', String(no));
+  const a = best.closest('a[href]') || best.querySelector('a[href]');
+  best.scrollIntoView({block: 'center'});
+  const r = best.getBoundingClientRect();
+  return {found: true, href: a ? a.getAttribute('href') : null,
+          x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 40)};
+}"""
+
+G21_MARKET_JS = """(title) => {
+  const norm = s => (s || '').replace(/[«»“”„"]/g, '"').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const want = norm(title);
+  const heads = Array.from(document.querySelectorAll('body *')).filter(el =>
+      el.children.length <= 3 && norm(el.innerText) === want);
+  const yesRe = /^да\\s*(\\d+(?:[.,]\\d+)?)$/i;
+  const isYes = el => yesRe.test((el.innerText || '').replace(/\\s+/g, ' ').trim());
+  for (const h of heads) {
+    let box = h;
+    for (let k = 0; k < 6 && box.parentElement; k++) {
+      box = box.parentElement;
+      // кнопка «Да КФ»: самый вложенный элемент, где есть и «Да», и КФ
+      const btn = Array.from(box.querySelectorAll('*')).find(el =>
+          isYes(el) && !Array.from(el.children).some(isYes));
+      if (!btn) continue;
+      let locked = false;
+      for (let e = btn, i = 0; e && i < 3; e = e.parentElement, i++) {
+        const cls = String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className);
+        if (/lock|disabled|blocked/i.test(cls) || e.getAttribute('aria-disabled') === 'true'
+            || e.querySelector('[class*="lock" i]')) { locked = true; break; }
+      }
+      btn.scrollIntoView({block: 'center'});
+      const r = btn.getBoundingClientRect();
+      const odds = parseFloat(btn.innerText.replace(/\\s+/g, ' ').trim().match(yesRe)[1]
+                              .replace(',', '.'));
+      return {x: r.left + r.width / 2, y: r.top + r.height / 2, odds, locked};
+    }
+  }
+  return null;
+}"""
+
+
+def g21_channel():
+  return state.get("g21_channel") or G21_CHANNEL or None
+
+
+def g21_open_game(page, no):
+  """Находит в поиске игру «21 Очко» №no и открывает её страницу."""
+  search_url = f"https://{cur_site()}{G21_SEARCH_PATH}"
+  deadline = time.time() + G21_FIND_TIMEOUT
+  last_numbers = []
+  while True:
+    try:
+      page.goto(search_url, wait_until="domcontentloaded", timeout=15000)
+    except Exception as e:
+      if "net::ERR" in str(e) or "Timeout" in str(e):
+        raise SiteDown(f"{cur_site()} не открывается — проверь VPN Opera") from e
+      raise
+    problem = site_problem(page)
+    if problem:
+      raise SiteDown(f"{cur_site()}: {problem}")
+    for _ in range(5):
+      page.wait_for_timeout(1000)
+      res = page.evaluate(G21_FIND_JS, [G21_GAME_TITLE, no])
+      if res and res.get("found"):
+        if res.get("href"):
+          page.goto(urljoin(search_url, res["href"]), wait_until="domcontentloaded",
+                    timeout=15000)
+        else:
+          base = page.url.split("?")[0]
+          page.mouse.click(res["x"], res["y"])
+          try:
+            page.wait_for_url(lambda u: u.split("?")[0] != base, timeout=8000)
+          except Exception:
+            raise RuntimeError(f"не открылась страница игры #{no}")
+        page.wait_for_timeout(1500)
+        return page.url
+      last_numbers = (res or {}).get("numbers") or last_numbers
+    if last_numbers and min(last_numbers) > no:
+      raise SkipSignal(f"игра #{no} уже прошла (в поиске с #{min(last_numbers)})")
+    if time.time() > deadline:
+      seen = ", ".join(str(x) for x in sorted(last_numbers)[:6]) or "нет игр"
+      raise SkipSignal(f"игра «{G21_GAME_TITLE}» #{no} не найдена в поиске (видно: {seen})")
+
+
+def _g21_coupon_limit(page):
+  """Максимальная ставка из купона («от 10 ₽ до 970 ₽») или None."""
+  try:
+    body = page.evaluate("() => document.body.innerText || ''")
+  except Exception:
+    return None
+  m = re.search(r"до\s*([\d\s ]+(?:[.,]\d+)?)\s*₽", body or "", re.I)
+  if not m:
+    return None
+  try:
+    return float(re.sub(r"[\s ]", "", m.group(1)).replace(",", "."))
+  except ValueError:
+    return None
+
+
+def prepare_21_bet(page, sig, stake):
+  out = next((v for v in G21_OUTCOMES.values() if v[0] == sig["market"]), None)
+  if out is None:
+    raise SkipSignal(f"исход {sig['market']} для 21 очко не поддерживается")
+  _, block_title, coupon_word = out
+  no = sig["match_no"]
+
+  url = g21_open_game(page, no)
+  with lock:
+    sig["match_url"] = url
+  clear_coupon(page)
+
+  btn = None
+  searched = False
+  deadline = time.time() + 20
+  while time.time() < deadline:
+    btn = page.evaluate(G21_MARKET_JS, block_title)
+    if btn:
+      break
+    if not searched:
+      # рынка не видно — пробуем «Поиск по рынкам»
+      inp = page.locator('input[placeholder*="рынк" i]')
+      if inp.count():
+        try:
+          inp.first.fill(coupon_word)
+          searched = True
+        except Exception:
+          pass
+    page.wait_for_timeout(1000)
+  if not btn:
+    raise SkipSignal(f"нет рынка «{block_title}» в игре #{no}")
+  if btn.get("locked"):
+    raise SkipSignal(f"игра #{no} уже началась — ставки закрыты")
+
+  odds = float(btn["odds"])
+  if odds < get_min_odds():
+    raise SkipSignal(f"КФ {odds} ниже минимума {get_min_odds()}")
+  want = sig.get("odds")
+  if want and abs(odds - want) / want > G21_MAX_ODDS_DIFF:
+    raise SkipSignal(f"КФ на сайте {odds}, в сигнале {want} — слишком большая разница")
+
+  page.mouse.click(btn["x"], btn["y"])
+  page.wait_for_timeout(1200)
+  cards = page.locator('[data-test="betting-quick-coupon-events-card-market-name"]')
+  if cards.count() == 0:
+    raise SkipSignal(f"исход не попал в купон — игра #{no}, вероятно, уже началась")
+  if cards.count() != 1:
+    raise RuntimeError(f"в купоне {cards.count()} событий вместо одного")
+  card_text = cards.first.inner_text()
+  if coupon_word.lower() not in card_text.lower():
+    raise RuntimeError(f"в купон попал не тот исход: {card_text}")
+
+  limit = _g21_coupon_limit(page)
+  amount = math.floor(min(stake, limit) if limit else stake)
+  if amount < 10:
+    raise SkipSignal(f"сумма {money(amount)} меньше минимальной ставки сайта")
+  if limit and amount < stake:
+    send(f"ℹ️ 21 очко #{no}: ставка {money(stake)} больше лимита сайта — ставлю {money(amount)}.")
+  _filled["stake"] = float(amount)
+  fill_stake(page, amount)
+  return odds
+
+
+def parse_21_post(text):
+  """Сообщение из канала 21 очко (AUTO21 …) → событие, ('stop', sig) или None."""
+  m = re.search(r"AUTO21\s+(BET|RESULT|STOP)\b(.*)", text or "", re.I)
+  if not m:
+    return None
+  cmd = m.group(1).upper()
+  kv = {k.lower(): v for k, v in re.findall(r"(\w+)=(\S+)", m.group(2))}
+  sid = kv.get("sig")
+  if not sid:
+    return None
+  if cmd == "STOP":
+    return ("stop", sid)
+  try:
+    no = int(kv["game"])
+  except (KeyError, ValueError):
+    return None
+  if cmd == "RESULT":
+    win = kv.get("win")
+    if win not in ("0", "1"):
+      return None
+    return {
+        "kind": "result",
+        "game": "g21",
+        "result": "win" if win == "1" else "lose",
+        "signal_id": f"g21:{sid}:{no}",
+        "players": None,
+        "set": None,
+        "event_id": f"g21:{sid}:{no}:res",
+    }
+  out = G21_OUTCOMES.get(kv.get("out", "").upper())
+  try:
+    step = int(kv.get("step", ""))
+    kf = float(kv["kf"].replace(",", ".")) if kv.get("kf") else None
+  except ValueError:
+    return None
+  if out is None:
+    return ("unsupported", kv.get("out", "?"))
+  return {
+      "kind": "signal",
+      "game": "g21",
+      "players": "Игрок — Дилер",
+      "market": out[0],
+      "odds": kf,
+      "step": step,
+      "set": 1,
+      "line": 1.0,
+      "match_no": no,
+      "sig_id": sid,
+  }
+
+
+def _process_21_message(msg, is_edit=False):
+  ev = parse_21_post(msg.text or msg.caption or "")
+  if ev is None:
+    return
+  if isinstance(ev, tuple):
+    if ev[0] == "stop":
+      send(f"🃏 21 очко: цепочка {html.escape(ev[1])} остановлена сигналом STOP.")
+    else:
+      send(f"⚠️ 21 очко: исход {html.escape(ev[1])} пока не поддерживается — пропуск.")
+    return
+  roll_day()
+  if ev["kind"] == "signal":
+    if not game_on("g21") or not state["running"]:
+      return  # 21 очко выключено — сигнал тихо пропускаем
+    event_id = f"g21:{ev['sig_id']}:{ev['match_no']}"
+  else:
+    event_id = ev["event_id"]
+  try:
+    enqueue_event(event_id, ev, received_at=time.time())
+  except ValueError as e:
+    send(f"⚠️ 21 очко: событие отклонено: {html.escape(str(e))}")
+
+
 class PlacementUnknown(RuntimeError):
   pass
 
@@ -1851,10 +2151,11 @@ def check_signal(job, stake):
   game = game_of(sig)
   if not game_on(game):
     raise RuntimeError(f"{GAMES.get(game, game)} выключен в пульте")
-  if not 1 <= sig["step"] <= get_steps_for(game) or not 1 <= sig["set"] <= 7:
+  max_steps = get_steps_for(game, sig.get("market") if game == "g21" else None)
+  if not 1 <= sig["step"] <= max_steps or not 1 <= sig["set"] <= 7:
     raise RuntimeError(
-        f"шаг {sig['step']} больше лимита ({get_steps_for(game)})"
-        if sig["step"] > get_steps_for(game)
+        f"шаг {sig['step']} больше лимита ({max_steps})"
+        if sig["step"] > max_steps
         else "недопустимый шаг или номер партии"
     )
   stats = state["today_dry" if job["dry"] else "today_real"]
@@ -1939,8 +2240,10 @@ def _find_place_bet_button(page):
 
 
 def place_bet_real(page, job, stake):
+  """Возвращает (КФ, баланс после ставки, поставленная сумма)."""
   sig = job["sig"]
   odds = prepare_bet(page, sig, stake)
+  stake = take_filled_stake(stake)
 
   btn = None
   for _ in range(25):
@@ -2008,7 +2311,7 @@ def place_bet_real(page, job, stake):
       page.wait_for_timeout(500)
       bal = get_site_balance(page)
       if bal is not None and abs(bal - (bal_before - stake)) <= 0.01:
-        return odds, bal
+        return odds, bal, stake
   except Exception as e:
     raise PlacementUnknown(
         "соединение потеряно после нажатия Place a bet; ставка могла пройти"
@@ -2328,9 +2631,10 @@ def job_test(page, job):
 
 def warn_last_step(sig):
   game = game_of(sig)
-  if sig["step"] >= get_steps_for(game):
+  steps = get_steps_for(game, sig.get("market") if game == "g21" else None)
+  if sig["step"] >= steps:
     send(
-        f"⚠️ Это последний шаг догона ({sig['step']}/{get_steps_for(game)})!\n"
+        f"⚠️ Это последний шаг догона ({sig['step']}/{steps})!\n"
         f"{html.escape(sig['players'] or '')} — {html.escape(describe(sig))}"
     )
 
@@ -2338,7 +2642,7 @@ def warn_last_step(sig):
 def job_bet(page, job):
   sig = job["sig"]
   game = game_of(sig)
-  stake = stake_for(sig["step"], game)
+  stake = stake_for(sig["step"], game, sig.get("market"))
   title = html.escape(sig["players"] or "матч не распознан")
 
   def head(odds):
@@ -2352,7 +2656,7 @@ def job_bet(page, job):
         + "\nШаг догона: "
         + str(sig["step"])
         + " из "
-        + str(get_steps_for(game))
+        + str(get_steps_for(game, sig.get("market") if game == "g21" else None))
         + "\nСумма: "
         + money(stake)
     )
@@ -2419,6 +2723,7 @@ def job_bet(page, job):
     try:
       if job["dry"]:
         odds = prepare_bet(page, sig, stake)
+        stake = take_filled_stake(stake)
         with lock:
           check_signal(job, stake)
           previous = copy.deepcopy(state)
@@ -2449,7 +2754,7 @@ def job_bet(page, job):
         return
 
       else:
-        odds, bal = place_bet_real(page, job, stake)
+        odds, bal, stake = place_bet_real(page, job, stake)
         with lock:
           previous = copy.deepcopy(state)
           bet = next(
@@ -2812,6 +3117,9 @@ def _process_channel_message(msg, is_edit=False):
   if msg.chat.id == PEN_CHANNEL:
     _process_pen_message(msg, is_edit)
     return
+  if g21_channel() and msg.chat.id == g21_channel():
+    _process_21_message(msg, is_edit)
+    return
   with lock:
     if msg.chat.id not in state["channels"]:
       if msg.chat.id not in announced_channels:
@@ -2820,6 +3128,10 @@ def _process_channel_message(msg, is_edit=False):
         kb.add(types.InlineKeyboardButton(
             "✅ Добавить канал теннисных сигналов",
             callback_data=f"setch_{msg.chat.id}",
+        ))
+        kb.add(types.InlineKeyboardButton(
+            "🃏 Это канал 21 очко",
+            callback_data=f"set21_{msg.chat.id}",
         ))
         title = html.escape(getattr(msg.chat, "title", "") or "")
         send(
@@ -3064,7 +3376,7 @@ def status_text():
   ) + f" · ⚽ {PEN_CHANNEL}"
 
   return (
-      " <b>Автоставка DB Bet (теннис + пенальти)</b>\n"
+      " <b>Автоставка DB Bet (теннис + пенальти + 21 очко)</b>\n"
       + "Статус: "
       + st_running
       + "\n"
@@ -3083,6 +3395,13 @@ def status_text():
       + "\n"
       + "⚽ Пенальти: "
       + html.escape(pen_ladder_text())
+      + "\n"
+      + "🃏 21 очко (канал "
+      + str(g21_channel() or "не задан")
+      + "):\n  Голд: "
+      + html.escape(g21_ladder_text("ГОЛД"))
+      + "\n  Раздача: "
+      + html.escape(g21_ladder_text("РАЗДАЧА"))
       + "\n"
       + "Игры: "
       + ", ".join(
@@ -3174,6 +3493,27 @@ def cmd_limit(msg):
     state["daily_loss_limit"] = val
     save_state()
   send(f"Дневной стоп-лосс: {limit_text()}")
+
+
+@bot.message_handler(commands=["vbank"])
+def cmd_vbank(msg):
+  """Виртуальный банк сухого режима: /vbank 20000."""
+  if msg.from_user.id != ADMIN_ID:
+    return
+  parts = (msg.text or "").replace(",", ".").split()
+  try:
+    if len(parts) != 2:
+      raise ValueError
+    val = float(parts[1])
+    if not math.isfinite(val) or val <= 0:
+      raise ValueError
+  except ValueError:
+    send(f"Виртуальный банк: {money(state['virtual_bank'])}\nЗадать: /vbank 20000")
+    return
+  with lock:
+    state["virtual_bank"] = round(val, 2)
+    save_state()
+  send(f"🧪 Виртуальный банк сухого режима: {money(state['virtual_bank'])}")
 
 
 @bot.message_handler(commands=["mirror"])
@@ -3500,6 +3840,19 @@ def on_cb(c):
     pass
 
   d = c.data
+  if d.startswith("set21_"):
+    try:
+      ch = int(d[6:])
+    except ValueError:
+      return
+    with lock:
+      state["g21_channel"] = ch
+      if ch in state["channels"]:
+        state["channels"].remove(ch)
+        state["channel_id"] = state["channels"][0] if state["channels"] else None
+      save_state()
+    send(f"🃏 Канал 21 очко: <code>{ch}</code>. Сигналы AUTO21 из него идут в автоставку.")
+    return
   if d.startswith("setch_"):
     try:
       ch = int(d[6:])
