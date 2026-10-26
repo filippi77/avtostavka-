@@ -8,6 +8,9 @@ import math
 import os
 import queue
 import re
+import socket
+import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -17,8 +20,18 @@ import telebot
 from playwright.sync_api import sync_playwright
 from telebot import types
 
+# Только одна копия бота: две копии с одним токеном делят сообщения Telegram
+# (ошибка 409 Conflict) — одна ставит, другая теряет сигналы.
+_single = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+  _single.bind(("127.0.0.1", 47394))
+except OSError:
+  print("⛔ autobet_bot.py уже запущен — вторая копия не стартует. Если копий быть"
+        " не должно: Диспетчер задач → завершить все python и запустить бота один раз.")
+  sys.exit(1)
+
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "26.10 07:00"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "26.10 07:30"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2747,7 +2760,6 @@ def kill_own_browser():
   иначе держит задание вечно, а профиль занят и новый не запустится.
   Ищем только процессы chrome с этим --user-data-dir, а не всё, где встречается
   путь, — иначе команда закрыла бы сама себя."""
-  import subprocess
   try:
     if os.name == "nt":
       prof = BROWSER_PROFILE.replace("'", "''")
@@ -2772,7 +2784,28 @@ def kill_own_browser():
     print("Не удалось закрыть браузер бота:", e)
 
 
+def install_chromium():
+  """Ставит Chromium для Playwright (один раз, ~150 МБ, 1–3 минуты)."""
+  send("⏳ Устанавливаю Chromium для своего браузера (1–3 минуты)…")
+  r = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
+                     capture_output=True, text=True, timeout=900)
+  if r.returncode != 0:
+    raise RuntimeError("установка Chromium не удалась: "
+                       + (r.stderr or r.stdout or "")[-300:])
+  send("✅ Chromium установлен.")
+
+
 def launch_own_browser(p):
+  try:
+    return _launch_own_browser(p)
+  except Exception as e:
+    if "Executable doesn't exist" not in str(e) and "playwright install" not in str(e):
+      raise
+  install_chromium()  # Chromium ещё не скачан — ставим сами и запускаем снова
+  return _launch_own_browser(p)
+
+
+def _launch_own_browser(p):
   kill_own_browser()  # хвост от прошлого запуска держит профиль
   device = dict(p.devices.get(BROWSER_DEVICE) or {})
   device.pop("default_browser_type", None)
