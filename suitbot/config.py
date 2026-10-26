@@ -125,6 +125,18 @@ class Config:
     drop_minutes: int = int(os.getenv("DROP_MINUTES", "10"))
     drop_stars_prize: str = os.getenv("DROP_STARS_PRIZE", "50 ⭐")
 
+    # Магазин за фишки (в личке с ботом).
+    shop_enabled: bool = os.getenv("SHOP_ENABLED", "1") == "1"
+    shop_badges: tuple[str, ...] = tuple(os.getenv("SHOP_BADGES", "💎,🐉,🦁,⚡️,🔥,🍀,🎩,🦅").split(","))
+    shop_badge_price: int = int(os.getenv("SHOP_BADGE_PRICE", "10000"))
+    shop_title_price: int = int(os.getenv("SHOP_TITLE_PRICE", "30000"))
+    shop_custom_title_price: int = int(os.getenv("SHOP_CUSTOM_TITLE_PRICE", "50000"))
+    shop_title_days: int = int(os.getenv("SHOP_TITLE_DAYS", "7"))
+    shop_vip_price: int = int(os.getenv("SHOP_VIP_PRICE", "20000"))
+    shop_vip_days: int = int(os.getenv("SHOP_VIP_DAYS", "7"))
+    vip_max_bet: int = int(os.getenv("VIP_MAX_BET", "100000"))
+    shop_spin_price: int = int(os.getenv("SHOP_SPIN_PRICE", "1000"))
+
     def payout(self, kind: str, pick: str) -> float:
         if kind == "suit":
             return self.payout_suit

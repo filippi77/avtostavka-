@@ -25,7 +25,8 @@ from .parser import SUITS, suit_emoji
 
 log = logging.getLogger(__name__)
 
-STAKES = (10, 50, 100, 500)
+# Суммы на кнопках карточки, по рядам. Последняя — для VIP (ставки до VIP_MAX_BET).
+STAKE_ROWS = ((50, 100, 500), (1000, 5000, 25000))
 CARD_FREQUENCIES = (1, 5, 10, 0)  # варианты в панели; 0 — выключено
 RATING_COOLDOWN = 5  # секунд между нажатиями «Рейтинг» одним игроком
 
@@ -57,7 +58,7 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duel
             InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
             for code in betting.SIDES
         ],
-        [InlineKeyboardButton(text=f"💰 {s}", callback_data=f"st:{s}") for s in STAKES],
+        *[[InlineKeyboardButton(text=f"💰 {s}", callback_data=f"st:{s}") for s in row] for row in STAKE_ROWS],
     ]
     if tournament_on:
         rows.append([

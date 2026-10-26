@@ -47,9 +47,14 @@ async def place(
     game: int, kind: str, pick: str, amount: int, tournament_bet: bool,
 ) -> str:
     """Проверяет и принимает ставку. Возвращает текст подтверждения или бросает BetError."""
-    max_bet = cfg.tournament_max_bet if tournament_bet else cfg.max_bet
+    if tournament_bet:
+        max_bet = cfg.tournament_max_bet
+    else:
+        user = await db.get_user(user_id)
+        max_bet = cfg.vip_max_bet if user and user["vip_until"] > time.time() else cfg.max_bet
     if not cfg.min_bet <= amount <= max_bet:
-        raise BetError(t("bet_limits", min=cfg.min_bet, max=max_bet))
+        hint = t("bet_limits_vip", vip=cfg.vip_max_bet) if amount > max_bet and max_bet < cfg.vip_max_bet else ""
+        raise BetError(t("bet_limits", min=cfg.min_bet, max=max_bet) + hint)
 
     tournament_id = None
     if tournament_bet:

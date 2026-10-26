@@ -21,7 +21,7 @@ from aiogram.types import (
     User,
 )
 
-from . import activity, admin, betting, cards, duels, i18n, penalty, rating
+from . import activity, admin, betting, cards, duels, i18n, penalty, rating, shop
 from . import tournament as tour
 from .access import SubscriptionChecker
 from .betting import describe_pick
@@ -42,8 +42,9 @@ def menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=t("btn_balance")), KeyboardButton(text=t("btn_bonus"))],
             [KeyboardButton(text=t("btn_rating")), KeyboardButton(text=t("btn_tournament"))],
-            [KeyboardButton(text=t("btn_spin")), KeyboardButton(text=t("btn_buy"))],
-            [KeyboardButton(text=t("btn_active")), KeyboardButton(text=t("btn_help"))],
+            [KeyboardButton(text=t("btn_spin")), KeyboardButton(text=t("btn_shop"))],
+            [KeyboardButton(text=t("btn_buy")), KeyboardButton(text=t("btn_active"))],
+            [KeyboardButton(text=t("btn_help"))],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -80,7 +81,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
 
     async def cabinet_text(user) -> str:
         lines = [
-            f"👤 <b>{escape(user['name'])}</b>",
+            f"👤 <b>{escape((user['badge'] + ' ' if user['badge'] else '') + user['name'])}</b>",
             t("cab_chips", balance=user["balance"], rank=await db.user_rank(user["id"])),
         ]
         current = await db.active_tournament() if cfg.tournament_enabled else None
@@ -93,6 +94,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         lines.append(t("cab_bonus_ready") if wait <= 0 else t("cab_bonus_wait", wait=format_wait(wait)))
         spin_wait = user["last_spin"] + 86400 - int(time.time())
         lines.append(t("cab_spin_ready") if spin_wait <= 0 else t("cab_spin_wait", wait=format_wait(spin_wait)))
+        lines += await shop.owned_lines(cfg, db, user)
         points, place = await db.activity_of(activity.week_of(cfg), user["id"])
         if place:
             lines.append(t("cab_active", points=points, place=place))
@@ -535,6 +537,9 @@ async def main() -> None:
     dp.include_router(duels.build_router(
         cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
     ))
+    dp.include_router(shop.build_router(
+        cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username)
+    ))
     dp.include_router(build_router(cfg, db, subs))
     # Последним: ловит обычные сообщения в чате для «Актива недели».
     dp.include_router(activity.build_router(
@@ -542,6 +547,7 @@ async def main() -> None:
     ))
     tasks = [
         asyncio.create_task(activity.loop(cfg, db, bot)),
+        asyncio.create_task(shop.loop(cfg, db, bot)),
         asyncio.create_task(refund_loop(cfg, db)),
         asyncio.create_task(cards.window_loop(cfg, db, bot)),
         asyncio.create_task(duels.loop(cfg, db, bot)),

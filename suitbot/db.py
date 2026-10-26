@@ -14,7 +14,11 @@ CREATE TABLE IF NOT EXISTS users (
     -- что выбрано на кнопках карточки игры: сумма и кошелёк (main | tour)
     pref_stake  INTEGER NOT NULL DEFAULT 50,
     pref_wallet TEXT NOT NULL DEFAULT 'tour',
-    last_spin   INTEGER NOT NULL DEFAULT 0
+    last_spin   INTEGER NOT NULL DEFAULT 0,
+    -- магазин: значок у имени, VIP до какого времени, купленные попытки крутилки
+    badge       TEXT NOT NULL DEFAULT '',
+    vip_until   INTEGER NOT NULL DEFAULT 0,
+    extra_spins INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS bets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,6 +135,21 @@ CREATE TABLE IF NOT EXISTS drop_claims (
     claimed_at  INTEGER NOT NULL,
     PRIMARY KEY (drop_id, user_id)
 );
+-- Звания в чате, выданные ботом через права админа: снимаются, когда срок вышел.
+CREATE TABLE IF NOT EXISTS titles (
+    chat_id     INTEGER NOT NULL,
+    user_id     INTEGER NOT NULL,
+    title       TEXT NOT NULL,
+    until       INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS purchases (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    item        TEXT NOT NULL,
+    price       INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
@@ -156,7 +175,12 @@ class DB:
 
     async def _migrate(self) -> None:
         """Добавляет столбцы, появившиеся в новых версиях, в базу, созданную старой."""
-        added = {"users": {"last_spin": "INTEGER NOT NULL DEFAULT 0"}}
+        added = {"users": {
+            "last_spin": "INTEGER NOT NULL DEFAULT 0",
+            "badge": "TEXT NOT NULL DEFAULT ''",
+            "vip_until": "INTEGER NOT NULL DEFAULT 0",
+            "extra_spins": "INTEGER NOT NULL DEFAULT 0",
+        }}
         for table, columns in added.items():
             cur = await self.conn.execute(f"PRAGMA table_info({table})")
             existing = {row["name"] for row in await cur.fetchall()}
@@ -207,6 +231,11 @@ class DB:
         cur = await self.conn.execute(
             "UPDATE users SET last_spin = ? WHERE id = ? AND last_spin <= ?", (now, user_id, now - period)
         )
+        if not cur.rowcount:
+            # сегодняшняя попытка потрачена — берём купленную в магазине, если есть
+            cur = await self.conn.execute(
+                "UPDATE users SET extra_spins = extra_spins - 1 WHERE id = ? AND extra_spins > 0", (user_id,)
+            )
         await self.conn.commit()
         if cur.rowcount:
             return 0
@@ -238,7 +267,7 @@ class DB:
 
     async def top(self, limit: int = 10) -> list[aiosqlite.Row]:
         cur = await self.conn.execute(
-            "SELECT id, name, balance FROM users ORDER BY balance DESC, id LIMIT ?", (limit,)
+            "SELECT id, (CASE WHEN users.badge != '' THEN users.badge || ' ' ELSE '' END || users.name) AS name, balance FROM users ORDER BY balance DESC, id LIMIT ?", (limit,)
         )
         return await cur.fetchall()
 
@@ -290,7 +319,7 @@ class DB:
 
     async def open_bets_for_game(self, game: int) -> list[aiosqlite.Row]:
         cur = await self.conn.execute(
-            "SELECT b.*, u.name FROM bets b JOIN users u ON u.id = b.user_id "
+            "SELECT b.*, (CASE WHEN u.badge != '' THEN u.badge || ' ' ELSE '' END || u.name) AS name FROM bets b JOIN users u ON u.id = b.user_id "
             "WHERE b.status = 'open' AND b.game = ?",
             (game,),
         )
@@ -478,7 +507,7 @@ class DB:
 
     async def standings(self, tournament_id: int) -> list[aiosqlite.Row]:
         cur = await self.conn.execute(
-            "SELECT e.*, u.name, u.username, u.created_at AS user_created_at "
+            "SELECT e.*, (CASE WHEN u.badge != '' THEN u.badge || ' ' ELSE '' END || u.name) AS name, u.username, u.created_at AS user_created_at "
             "FROM tournament_entries e JOIN users u ON u.id = e.user_id "
             "WHERE e.tournament_id = ? "
             "ORDER BY e.balance DESC, e.bets_count DESC, e.joined_at",
@@ -551,7 +580,7 @@ class DB:
 
     async def get_duel(self, duel_id: int) -> aiosqlite.Row | None:
         cur = await self.conn.execute(
-            "SELECT d.*, c.name AS challenger_name, o.name AS opponent_name FROM duels d "
+            "SELECT d.*, (CASE WHEN c.badge != '' THEN c.badge || ' ' ELSE '' END || c.name) AS challenger_name, (CASE WHEN o.badge != '' THEN o.badge || ' ' ELSE '' END || o.name) AS opponent_name FROM duels d "
             "JOIN users c ON c.id = d.challenger_id LEFT JOIN users o ON o.id = d.opponent_id WHERE d.id = ?",
             (duel_id,),
         )
@@ -695,7 +724,7 @@ class DB:
 
     async def activity_top(self, week: int, limit: int = 10) -> list[aiosqlite.Row]:
         cur = await self.conn.execute(
-            "SELECT a.user_id, a.points, u.name, u.username FROM activity a JOIN users u ON u.id = a.user_id "
+            "SELECT a.user_id, a.points, (CASE WHEN u.badge != '' THEN u.badge || ' ' ELSE '' END || u.name) AS name, u.username FROM activity a JOIN users u ON u.id = a.user_id "
             "WHERE a.week = ? AND a.points > 0 ORDER BY a.points DESC, a.last_msg_at LIMIT ?",
             (week, limit),
         )
@@ -757,7 +786,7 @@ class DB:
 
     async def drop_winners(self, drop_id: int) -> list[aiosqlite.Row]:
         cur = await self.conn.execute(
-            "SELECT c.user_id, u.name, u.username FROM drop_claims c JOIN users u ON u.id = c.user_id "
+            "SELECT c.user_id, (CASE WHEN u.badge != '' THEN u.badge || ' ' ELSE '' END || u.name) AS name, u.username FROM drop_claims c JOIN users u ON u.id = c.user_id "
             "WHERE c.drop_id = ? ORDER BY c.claimed_at, c.rowid",
             (drop_id,),
         )
@@ -771,3 +800,70 @@ class DB:
     async def open_drops_older_than(self, ts: int) -> list[aiosqlite.Row]:
         cur = await self.conn.execute("SELECT * FROM drops WHERE closed = 0 AND created_at < ?", (ts,))
         return await cur.fetchall()
+
+    # --- магазин ------------------------------------------------------------
+
+    async def spend(self, user_id: int, price: int, item: str) -> bool:
+        """Списывает фишки за покупку. False — не хватает."""
+        cur = await self.conn.execute(
+            "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?", (price, user_id, price)
+        )
+        if cur.rowcount:
+            await self.conn.execute(
+                "INSERT INTO purchases(user_id, item, price, created_at) VALUES (?, ?, ?, ?)",
+                (user_id, item, price, int(time.time())),
+            )
+        await self.conn.commit()
+        return bool(cur.rowcount)
+
+    async def refund_purchase(self, user_id: int, price: int, item: str) -> None:
+        await self.conn.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (price, user_id))
+        await self.conn.execute(
+            "INSERT INTO purchases(user_id, item, price, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, f"refund:{item}", -price, int(time.time())),
+        )
+        await self.conn.commit()
+
+    async def set_badge(self, user_id: int, badge: str) -> None:
+        await self.conn.execute("UPDATE users SET badge = ? WHERE id = ?", (badge, user_id))
+        await self.conn.commit()
+
+    async def extend_vip(self, user_id: int, seconds: int) -> int:
+        """Продлевает VIP (от текущего конца, если он ещё действует). Возвращает новый конец."""
+        now = int(time.time())
+        await self.conn.execute(
+            "UPDATE users SET vip_until = MAX(vip_until, ?) + ? WHERE id = ?", (now, seconds, user_id)
+        )
+        await self.conn.commit()
+        return (await self.get_user(user_id))["vip_until"]
+
+    async def add_extra_spin(self, user_id: int) -> None:
+        await self.conn.execute("UPDATE users SET extra_spins = extra_spins + 1 WHERE id = ?", (user_id,))
+        await self.conn.commit()
+
+    async def set_title(self, chat_id: int, user_id: int, title: str, until: int) -> None:
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO titles(chat_id, user_id, title, until) VALUES (?, ?, ?, ?)",
+            (chat_id, user_id, title, until),
+        )
+        await self.conn.commit()
+
+    async def get_title(self, chat_id: int, user_id: int) -> aiosqlite.Row | None:
+        cur = await self.conn.execute("SELECT * FROM titles WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
+        return await cur.fetchone()
+
+    async def expired_titles(self, now: int) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute("SELECT * FROM titles WHERE until <= ?", (now,))
+        return await cur.fetchall()
+
+    async def delete_title(self, chat_id: int, user_id: int) -> None:
+        await self.conn.execute("DELETE FROM titles WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
+        await self.conn.commit()
+
+    async def shop_sales(self) -> tuple[int, int]:
+        """(покупок, фишек потрачено) без возвратов."""
+        cur = await self.conn.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(price), 0) AS chips FROM purchases WHERE price > 0"
+        )
+        row = await cur.fetchone()
+        return row["n"], row["chips"]

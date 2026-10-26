@@ -9,7 +9,7 @@ from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from . import activity, cards, duels, i18n
+from . import activity, cards, duels, i18n, shop
 from .i18n import t
 from . import tournament as tour
 from .config import Config
@@ -108,6 +108,10 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         InlineKeyboardButton(text="⭐ Звёздная раздача", callback_data="adm:dropstar"),
         InlineKeyboardButton(text="🔥 Таблица", callback_data="adm:acttable"),
     ])
+    shop_open = await shop.shop_on(cfg, db)
+    bought, spent = await db.shop_sales()
+    lines.append(f"Магазин: {'✅ открыт' if shop_open else '⛔️ закрыт'} · покупок {bought} на {spent} фишек")
+    rows.append([InlineKeyboardButton(text=f"🛒 Магазин: {'закрыть' if shop_open else 'открыть'}", callback_data="adm:shop")])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:refresh")])
@@ -215,6 +219,10 @@ def build_router(cfg: Config, db: DB) -> Router:
             await db.set_state("lang", parts[2])
             i18n.set_lang(parts[2])
             note = f"Язык для игроков: {i18n.LANGS[i18n.LANG]}. Новые карточки и сообщения — на нём."
+        elif action == "shop":
+            on = await shop.shop_on(cfg, db)
+            await db.set_state("shop_enabled", "0" if on else "1")
+            note = "Магазин закрыт." if on else "Магазин открыт."
         elif action == "act":
             on = await activity.activity_on(cfg, db)
             await db.set_state("activity_enabled", "0" if on else "1")
