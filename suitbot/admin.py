@@ -24,6 +24,7 @@ WALLET_NAMES = {"main": "обычных", "tour": "турнирных"}
 
 def invite_text(cfg: Config, tournament=None) -> str:
     text = t("invite", start=cfg.start_balance, bonus=cfg.bonus_amount, days=cfg.bonus_period_days)
+    text += t("invite_shop")
     if tournament:
         text += t("invite_tour", ends=tour.format_ends(cfg, tournament["ends_at"]), prizes=tour.prizes_text(cfg))
     return text + t("invite_footer")
@@ -111,7 +112,10 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
     shop_open = await shop.shop_on(cfg, db)
     bought, spent = await db.shop_sales()
     lines.append(f"Магазин: {'✅ открыт' if shop_open else '⛔️ закрыт'} · покупок {bought} на {spent} фишек")
-    rows.append([InlineKeyboardButton(text=f"🛒 Магазин: {'закрыть' if shop_open else 'открыть'}", callback_data="adm:shop")])
+    rows.append([
+        InlineKeyboardButton(text=f"🛒 Магазин: {'закрыть' if shop_open else 'открыть'}", callback_data="adm:shop"),
+        InlineKeyboardButton(text="📢 Анонс магазина", callback_data="adm:shopnews"),
+    ])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:refresh")])
@@ -239,6 +243,21 @@ def build_router(cfg: Config, db: DB) -> Router:
             on = await duels.enabled(cfg, db)
             await db.set_state("duels_enabled", "0" if on else "1")
             note = "Дуэли выключены." if on else "Дуэли включены."
+        elif action == "shopnews":
+            main_chat = await db.get_state("main_chat")
+            if not main_chat:
+                note = "Чат ещё не выбран."
+            else:
+                me = await bot.me()
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text=t("shop_open_btn"), url=f"https://t.me/{me.username}?start=shop")
+                ]])
+                msg = await bot.send_message(int(main_chat), shop.news_text(cfg), reply_markup=kb)
+                try:
+                    await bot.pin_chat_message(int(main_chat), msg.message_id, disable_notification=True)
+                    note = "Анонс магазина отправлен и закреплён."
+                except Exception:
+                    note = "Анонс магазина отправлен."
         elif action == "duelnews":
             main_chat = await db.get_state("main_chat")
             if not main_chat:

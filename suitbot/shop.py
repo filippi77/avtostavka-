@@ -35,6 +35,17 @@ TITLE_ALLOWED_PUNCT = " -_.!?'"
 CUSTOM_TITLE_WAIT = 300  # сколько секунд ждём текст своего звания
 
 
+def news_text(cfg: Config) -> str:
+    return t("shop_news", badge=_fmt(cfg.shop_badge_price), title=_fmt(cfg.shop_title_price),
+             custom=_fmt(cfg.shop_custom_title_price), days=cfg.shop_title_days, vip=_fmt(cfg.shop_vip_price),
+             vip_days=cfg.shop_vip_days, vip_max=_fmt(cfg.vip_max_bet), spin=_fmt(cfg.shop_spin_price))
+
+
+def help_line(cfg: Config) -> str:
+    return t("help_shop", badge=_fmt(cfg.shop_badge_price), title=_fmt(cfg.shop_title_price),
+             vip=_fmt(cfg.shop_vip_price))
+
+
 def ready_titles() -> list[str]:
     return t("shop_titles").split("|")
 

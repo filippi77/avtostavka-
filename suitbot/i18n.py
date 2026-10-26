@@ -431,6 +431,25 @@ TEXTS: dict[str, tuple[str, str]] = {
                        "Siz allaqachon chat administratorisiz — do'kon orqali unvon berib bo'lmaydi. Fishkalar yechilmadi."),
     "shop_err_rights": ("Не получилось выдать звание: у бота нет права назначать админов. Фишки вернули.",
                         "Unvon berilmadi: botda adminlarni tayinlash huquqi yo'q. Fishkalar qaytarildi."),
+    "shop_open_btn": ("🛒 Открыть магазин", "🛒 Do'konni ochish"),
+    "shop_news": ("🛒 <b>Открылся магазин за фишки!</b>\n\n"
+                  "Выигранные фишки теперь можно потратить:\n"
+                  "✨ <b>Значок</b> у имени во всех сообщениях бота — {badge}, навсегда\n"
+                  "🏷 <b>Звание в чате</b> рядом с именем, как у админов — {title} (своё — {custom}), на {days} дн.\n"
+                  "💼 <b>VIP</b> — ставки до {vip_max} — {vip}, на {vip_days} дн.\n"
+                  "🎰 <b>Лишняя попытка крутилки</b> — {spin}\n\n"
+                  "Магазин — в личке с ботом, кнопка «🛒 Магазин». Играйте, копите и покупайте! 🍀",
+                  "🛒 <b>Fishka do'koni ochildi!</b>\n\n"
+                  "Yutgan fishkalaringizni endi sarflash mumkin:\n"
+                  "✨ <b>Belgi</b> — botning barcha xabarlarida ismingiz yonida — {badge}, abadiy\n"
+                  "🏷 <b>Chatdagi unvon</b> — adminlardek ismingiz yonida — {title} (o'zingizniki — {custom}), {days} kunga\n"
+                  "💼 <b>VIP</b> — {vip_max} gacha stavkalar — {vip}, {vip_days} kunga\n"
+                  "🎰 <b>Qo'shimcha aylantirish</b> — {spin}\n\n"
+                  "Do'kon — bot bilan shaxsiy chatda, «🛒 Do'kon» tugmasi. O'ynang, to'plang va xarid qiling! 🍀"),
+    "invite_shop": ("4. Тратьте фишки в 🛒 магазине: значок у имени, звание в чате, VIP.\n",
+                    "4. Fishkalarni 🛒 do'konda sarflang: ism yonidagi belgi, chatdagi unvon, VIP.\n"),
+    "help_shop": ("🛒 Магазин в кабинете: значок у имени — {badge}, звание в чате — {title}, VIP — {vip} фишек.\n",
+                  "🛒 Kabinetdagi do'kon: ism yonidagi belgi — {badge}, chatdagi unvon — {title}, VIP — {vip} fishka.\n"),
     "shop_title_news": ("🏷 Новое звание в чате: {name} — «{title}» на {days} дн.! Магазин — в личке с ботом.",
                         "🏷 {name} yangi «{title}» unvonini {days} kunga oldi! Do'kon — bot bilan shaxsiy chatda."),
 

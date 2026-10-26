@@ -116,7 +116,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         period = t("period_week") if cfg.bonus_period_days == 7 else t("period_days", days=cfg.bonus_period_days)
         return t(
             "help", suit=f"{cfg.payout_suit:g}", p=f"{cfg.payout_player:g}", b=f"{cfg.payout_banker:g}",
-            t=f"{cfg.payout_tie:g}", jackpot=cfg.spin_prizes[0], duel_line=duel_line + t("help_active"),
+            t=f"{cfg.payout_tie:g}", jackpot=cfg.spin_prizes[0], duel_line=duel_line + t("help_active") + shop.help_line(cfg),
             bonus_line=t("help_bonus", amount=cfg.bonus_amount, period=period),
         )
 
@@ -129,6 +129,12 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         user = await user_row(message.from_user)
         if command.args == "help":
             await message.answer(help_text(await duels.enabled(cfg, db)), reply_markup=menu_for(message))
+            return
+        if command.args == "shop" and await shop.shop_on(cfg, db):
+            # Ссылка из анонса в чате ведёт сразу в магазин; клавиатуру кабинета тоже показываем.
+            await message.answer(t("welcome"), reply_markup=menu_for(message))
+            text, kb = await shop.menu(cfg, db, user)
+            await message.answer(text, reply_markup=kb)
             return
         await message.answer(
             f"{t('welcome')}\n\n{await cabinet_text(user)}",
