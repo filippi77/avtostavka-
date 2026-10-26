@@ -8,6 +8,7 @@ import math
 import os
 import queue
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -21,17 +22,63 @@ from playwright.sync_api import sync_playwright
 from telebot import types
 
 # Только одна копия бота: две копии с одним токеном делят сообщения Telegram
-# (ошибка 409 Conflict) — одна ставит, другая теряет сигналы.
+# (ошибка 409 Conflict) — одна ставит, другая теряет сигналы. Если копия уже
+# есть (например, осталась от прошлого запуска Skript Manager), новая её
+# закрывает и работает сама: так всегда живёт последняя запущенная.
+_LOCK_PORT = 47394
+_PID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autobet_bot.pid")
 _single = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-try:
-  _single.bind(("127.0.0.1", 47394))
-except OSError:
-  print("⛔ autobet_bot.py уже запущен — вторая копия не стартует. Если копий быть"
-        " не должно: Диспетчер задач → завершить все python и запустить бота один раз.")
+
+
+def _is_python(pid):
+  """Номер из файла — точно процесс Python (а не чужая программа с тем же PID)."""
+  try:
+    if os.name == "nt":
+      out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                           capture_output=True, text=True, timeout=10).stdout
+    else:
+      out = subprocess.run(["ps", "-p", str(pid), "-o", "comm="],
+                           capture_output=True, text=True, timeout=10).stdout
+    return "python" in out.lower()
+  except Exception:
+    return False
+
+
+def _take_single_lock():
+  for attempt in range(3):
+    try:
+      _single.bind(("127.0.0.1", _LOCK_PORT))
+      with open(_PID_FILE, "w") as fh:
+        fh.write(str(os.getpid()))
+      return
+    except OSError:
+      pass
+    old_pid = None
+    try:
+      with open(_PID_FILE) as fh:
+        old_pid = int(fh.read().strip() or 0)
+    except Exception:
+      pass
+    if old_pid and old_pid != os.getpid() and attempt < 2 and _is_python(old_pid):
+      print(f"⚠️ Уже работает копия autobet_bot.py (PID {old_pid}) — закрываю её.")
+      try:
+        os.kill(old_pid, signal.SIGTERM)  # на Windows это TerminateProcess
+      except Exception as e:
+        print("Не удалось закрыть старую копию:", e)
+      time.sleep(3)
+      continue
+    break
+  print("⛔ autobet_bot.py уже запущен, а его номер процесса неизвестен — вторая"
+        " копия не стартует. Перезагрузите компьютер (или в Диспетчере задач →"
+        " Подробности → столбец «Командная строка» завершите python с autobet_bot.py)"
+        " и запустите бота один раз через Skript Manager.")
   sys.exit(1)
 
+
+_take_single_lock()
+
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "26.10 07:30"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "26.10 07:50"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))

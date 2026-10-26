@@ -7,3 +7,4 @@ dbbet/autobet.env
 dbbet/autobet_state.json
 vlad/vlad21_settings*.json
 dbbet/browser_profile/
+dbbet/autobet_bot.pid
