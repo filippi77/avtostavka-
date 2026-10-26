@@ -341,6 +341,38 @@ TEXTS: dict[str, tuple[str, str]] = {
     "invite_footer": ("\nФишки — игровая валюта, их нельзя вывести.", "\nFishkalar — o'yin valyutasi, ularni yechib olib bo'lmaydi."),
     "gift_all": ("🎁 <b>Подарок от админа!</b> Всем +{amount} фишек. Удачи в прогнозах!",
                  "🎁 <b>Admindan sovg'a!</b> Hammaga +{amount} fishka. Bashoratlarda omad!"),
+    # --- актив недели и раздачи ---
+    "btn_active": ("🔥 Актив", "🔥 Faollik"),
+    "cab_active": ("🔥 Актив недели: {points} очков · {place} место", "🔥 Hafta faolligi: {points} ochko · {place}-o'rin"),
+    "active_title": ("🔥 <b>Актив недели</b> · до {ends}", "🔥 <b>Hafta faolligi</b> · {ends} gacha"),
+    "active_rules": ("Очки: сообщение в чате от {words} слов — 1 (не чаще раза в минуту), ответ другому — ещё 1, "
+                     "ставка — 1, дуэль — 3. Для приза нужно минимум {min} очков.",
+                     "Ochkolar: chatda {words} so'zdan iborat xabar — 1 (daqiqada bir martadan ko'p emas), "
+                     "boshqaga javob — yana 1, stavka — 1, duel — 3. Sovrin uchun kamida {min} ochko kerak."),
+    "active_empty": ("Пока никто не набрал очков — будьте первым!", "Hozircha hech kim ochko to'plamadi — birinchi bo'ling!"),
+    "active_me": ("Вы: <b>{place} место</b> · {points} очков", "Siz: <b>{place}-o'rin</b> · {points} ochko"),
+    "active_me_none": ("У вас пока нет очков на этой неделе.", "Bu hafta sizda hali ochko yo'q."),
+    "active_over": ("🔥 <b>Актив недели — итоги!</b>\n", "🔥 <b>Hafta faolligi — natijalar!</b>\n"),
+    "active_over_footer": ("\nСпасибо, что вы с нами! Призы отправит администратор. Новая неделя уже началась.",
+                           "\nBiz bilan ekaningiz uchun rahmat! Sovrinlarni administrator yuboradi. Yangi hafta boshlandi."),
+    "active_over_none": ("🔥 Актив недели окончен: никто не набрал {min} очков. Новая неделя уже началась!",
+                         "🔥 Hafta faolligi tugadi: hech kim {min} ochko to'plamadi. Yangi hafta boshlandi!"),
+    "help_active": ("🔥 Актив недели: очки за сообщения, ставки и дуэли — лучшим призы. Таблица: /active\n",
+                    "🔥 Hafta faolligi: xabarlar, stavkalar va duellar uchun ochkolar — eng faollarga sovrin. Jadval: /active\n"),
+    "drop_post": ("🎁 <b>Раздача!</b> Первые {n}, кто нажмёт кнопку, получат по {amount} фишек!",
+                  "🎁 <b>Tarqatish!</b> Tugmani birinchi bosgan {n} kishi {amount} fishkadan oladi!"),
+    "drop_post_stars": ("⭐ <b>Звёздная раздача!</b> Первый, кто нажмёт кнопку, получит {prize} от администратора!",
+                        "⭐ <b>Yulduzli tarqatish!</b> Tugmani birinchi bosgan kishi administratordan {prize} oladi!"),
+    "drop_btn": ("🎁 Забрать", "🎁 Olish"),
+    "drop_winners": ("Успели: {names}", "Ulgurdi: {names}"),
+    "drop_over": ("Раздача окончена — следите за чатом, следующая будет внезапно!",
+                  "Tarqatish tugadi — chatni kuzating, keyingisi kutilmaganda bo'ladi!"),
+    "drop_ok": ("🎉 Успели! +{amount} фишек. Баланс: {balance}", "🎉 Ulgurdingiz! +{amount} fishka. Balans: {balance}"),
+    "drop_ok_stars": ("🎉 Вы первый! {prize} отправит администратор.", "🎉 Siz birinchisiz! {prize} ni administrator yuboradi."),
+    "drop_again": ("Вы уже забрали эту раздачу.", "Siz bu tarqatishni allaqachon oldingiz."),
+    "drop_late": ("Не успели — раздача уже закончилась. В следующий раз повезёт!",
+                  "Ulgurmadingiz — tarqatish tugadi. Keyingi safar omad kulib boqadi!"),
+
     # --- режим пенальти ---
     "welcome@pen": (
         "👋 Привет! Это игра в прогнозы на серии пенальти. Кнопки внизу — ваш кабинет.",

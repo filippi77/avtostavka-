@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULES = ["i18n", "parser", "penalty", "config", "db", "betting", "access", "tournament", "rating", "duels", "cards", "admin", "bot"]
+MODULES = ["i18n", "parser", "penalty", "config", "db", "betting", "access", "tournament", "rating", "activity", "duels", "cards", "admin", "bot"]
 
 HEADER = '''#!/usr/bin/env python3
 """Бот прогнозов на масти (баккара) — всё в одном файле.

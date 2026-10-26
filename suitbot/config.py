@@ -106,6 +106,25 @@ class Config:
     # Крутилка 🎰 раз в сутки: выигрыш за 777, за три одинаковых, за две, за промах.
     spin_prizes: tuple[int, ...] = tuple(int(x) for x in os.getenv("SPIN_PRIZES", "1000,300,50,10").split(","))
 
+    # «Актив недели»: очки за сообщения в чате (не чаще раза в минуту, от 3 слов),
+    # ответы другим, ставки и дуэли. В конце недели — топ и список для призов.
+    activity_enabled: bool = os.getenv("ACTIVITY_ENABLED", "1") == "1"
+    activity_prizes: tuple[str, ...] = tuple(
+        p.strip() for p in os.getenv("ACTIVITY_PRIZES", "100 ⭐|50 ⭐|25 ⭐").split("|") if p.strip()
+    )
+    activity_min_points: int = int(os.getenv("ACTIVITY_MIN_POINTS", "20"))
+    activity_min_words: int = int(os.getenv("ACTIVITY_MIN_WORDS", "3"))
+    activity_msg_cooldown: int = int(os.getenv("ACTIVITY_MSG_COOLDOWN", "60"))
+
+    # Внезапные раздачи: несколько раз в день в случайное время в эти часы.
+    drops_enabled: bool = os.getenv("DROPS_ENABLED", "1") == "1"
+    drops_per_day: int = int(os.getenv("DROPS_PER_DAY", "4"))
+    drop_hours: tuple[int, int] = tuple(int(x) for x in os.getenv("DROP_HOURS", "10-23").split("-"))  # type: ignore[assignment]
+    drop_amount: int = int(os.getenv("DROP_AMOUNT", "300"))
+    drop_winners: int = int(os.getenv("DROP_WINNERS", "3"))
+    drop_minutes: int = int(os.getenv("DROP_MINUTES", "10"))
+    drop_stars_prize: str = os.getenv("DROP_STARS_PRIZE", "50 ⭐")
+
     def payout(self, kind: str, pick: str) -> float:
         if kind == "suit":
             return self.payout_suit

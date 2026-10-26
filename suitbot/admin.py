@@ -9,7 +9,7 @@ from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from . import cards, duels, i18n
+from . import activity, cards, duels, i18n
 from .i18n import t
 from . import tournament as tour
 from .config import Config
@@ -94,6 +94,20 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
     other = "uz" if i18n.LANG == "ru" else "ru"
     lines.append(f"Язык для игроков: {i18n.LANGS[i18n.LANG]}")
     rows.append([InlineKeyboardButton(text=f"🌐 Язык → {i18n.LANGS[other]}", callback_data=f"adm:lang:{other}")])
+    act_on, drops_on = await activity.activity_on(cfg, db), await activity.drops_on(cfg, db)
+    nxt = await db.get_state("drop_next")
+    nxt_text = tour.format_ends(cfg, int(nxt)) if nxt and drops_on else "—"
+    lines.append(f"Актив недели: {'✅' if act_on else '⛔️'} · раздачи: {'✅' if drops_on else '⛔️'} "
+                 f"(следующая ~{nxt_text})")
+    rows.append([
+        InlineKeyboardButton(text=f"🔥 Актив: {'выкл' if act_on else 'вкл'}", callback_data="adm:act"),
+        InlineKeyboardButton(text=f"🎁 Раздачи: {'выкл' if drops_on else 'вкл'}", callback_data="adm:drops"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🎁 Раздача сейчас", callback_data="adm:dropnow"),
+        InlineKeyboardButton(text="⭐ Звёздная раздача", callback_data="adm:dropstar"),
+        InlineKeyboardButton(text="🔥 Таблица", callback_data="adm:acttable"),
+    ])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:refresh")])
@@ -201,6 +215,18 @@ def build_router(cfg: Config, db: DB) -> Router:
             await db.set_state("lang", parts[2])
             i18n.set_lang(parts[2])
             note = f"Язык для игроков: {i18n.LANGS[i18n.LANG]}. Новые карточки и сообщения — на нём."
+        elif action == "act":
+            on = await activity.activity_on(cfg, db)
+            await db.set_state("activity_enabled", "0" if on else "1")
+            note = "Актив недели выключен." if on else "Актив недели включён."
+        elif action == "drops":
+            on = await activity.drops_on(cfg, db)
+            await db.set_state("drops_enabled", "0" if on else "1")
+            note = "Автоматические раздачи выключены." if on else "Автоматические раздачи включены."
+        elif action in ("dropnow", "dropstar"):
+            note = await activity.post_drop(cfg, db, bot, stars=action == "dropstar")
+        elif action == "acttable":
+            await bot.send_message(query.from_user.id, await activity.board_text(cfg, db, query.from_user.id))
         elif action == "duels":
             on = await duels.enabled(cfg, db)
             await db.set_state("duels_enabled", "0" if on else "1")

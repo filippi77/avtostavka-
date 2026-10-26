@@ -21,7 +21,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
-from . import i18n
+from . import activity, i18n
 from .i18n import t
 from .parser import SUITS, suit_emoji
 
@@ -314,6 +314,8 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         if not await db.accept_duel(duel["id"], user["id"], last + 1):
             await query.answer(t("duel_no_funds", stake=duel["stake"]), show_alert=True)
             return
+        for uid in (duel["challenger_id"], user["id"]):
+            await activity.add(cfg, db, uid, activity.POINTS_DUEL)
         await query.answer(t("duel_started"))
         await refresh(cfg, db, bot, duel["id"])
 

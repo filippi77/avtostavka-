@@ -16,7 +16,7 @@ from html import escape
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from . import betting, duels, rating
+from . import activity, betting, duels, rating
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
@@ -228,6 +228,7 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         except betting.BetError as e:
             await query.answer(str(e), show_alert=True)
             return
+        await activity.add(cfg, db, user["id"], activity.POINTS_BET)
         # Короткая плашка сверху на пару секунд — видит только нажавший, в чат ничего не пишется.
         await query.answer(text, show_alert=False)
         await refresh(cfg, db, bot, int(game), chat_id)

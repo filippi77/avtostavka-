@@ -106,6 +106,31 @@ CREATE TABLE IF NOT EXISTS penalty_games (
     line        REAL,
     updated_at  INTEGER NOT NULL
 );
+-- Активность за неделю (week — начало недели, unix): очки за сообщения, ставки, дуэли.
+CREATE TABLE IF NOT EXISTS activity (
+    week        INTEGER NOT NULL,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    points      INTEGER NOT NULL DEFAULT 0,
+    last_msg_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (week, user_id)
+);
+-- Внезапные раздачи в чате: первые N нажавших получают фишки (или звёзды от админа).
+CREATE TABLE IF NOT EXISTS drops (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id     INTEGER NOT NULL,
+    message_id  INTEGER,
+    amount      INTEGER NOT NULL,      -- фишек каждому; 0 — звёздная раздача
+    stars_prize TEXT,
+    winners_max INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL,
+    closed      INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS drop_claims (
+    drop_id     INTEGER NOT NULL REFERENCES drops(id),
+    user_id     INTEGER NOT NULL,
+    claimed_at  INTEGER NOT NULL,
+    PRIMARY KEY (drop_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
@@ -645,3 +670,104 @@ class DB:
         )
         row = await cur.fetchone()
         return row["w"] or 0, row["l"] or 0, row["d"] or 0
+
+    # --- активность ---------------------------------------------------------
+
+    async def add_activity(self, week: int, user_id: int, points: int, message_cooldown: int | None = None) -> bool:
+        """Начисляет очки активности. С message_cooldown — не чаще раза в столько секунд
+        (для сообщений в чате). Возвращает, начислено ли."""
+        now = int(time.time())
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO activity(week, user_id) VALUES (?, ?)", (week, user_id)
+        )
+        if message_cooldown is None:
+            cur = await self.conn.execute(
+                "UPDATE activity SET points = points + ? WHERE week = ? AND user_id = ?", (points, week, user_id)
+            )
+        else:
+            cur = await self.conn.execute(
+                "UPDATE activity SET points = points + ?, last_msg_at = ? "
+                "WHERE week = ? AND user_id = ? AND last_msg_at <= ?",
+                (points, now, week, user_id, now - message_cooldown),
+            )
+        await self.conn.commit()
+        return bool(cur.rowcount)
+
+    async def activity_top(self, week: int, limit: int = 10) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute(
+            "SELECT a.user_id, a.points, u.name, u.username FROM activity a JOIN users u ON u.id = a.user_id "
+            "WHERE a.week = ? AND a.points > 0 ORDER BY a.points DESC, a.last_msg_at LIMIT ?",
+            (week, limit),
+        )
+        return await cur.fetchall()
+
+    async def activity_of(self, week: int, user_id: int) -> tuple[int, int | None]:
+        """(очки, место) игрока за неделю; место None, если очков нет."""
+        cur = await self.conn.execute("SELECT points FROM activity WHERE week = ? AND user_id = ?", (week, user_id))
+        row = await cur.fetchone()
+        points = row["points"] if row else 0
+        if not points:
+            return 0, None
+        cur = await self.conn.execute(
+            "SELECT COUNT(*) + 1 AS n FROM activity WHERE week = ? AND points > ?", (week, points)
+        )
+        return points, (await cur.fetchone())["n"]
+
+    # --- раздачи ------------------------------------------------------------
+
+    async def create_drop(self, chat_id: int, amount: int, winners_max: int, stars_prize: str | None = None) -> int:
+        cur = await self.conn.execute(
+            "INSERT INTO drops(chat_id, amount, stars_prize, winners_max, created_at) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, amount, stars_prize, winners_max, int(time.time())),
+        )
+        await self.conn.commit()
+        return cur.lastrowid
+
+    async def set_drop_message(self, drop_id: int, message_id: int) -> None:
+        await self.conn.execute("UPDATE drops SET message_id = ? WHERE id = ?", (message_id, drop_id))
+        await self.conn.commit()
+
+    async def get_drop(self, drop_id: int) -> aiosqlite.Row | None:
+        cur = await self.conn.execute("SELECT * FROM drops WHERE id = ?", (drop_id,))
+        return await cur.fetchone()
+
+    async def claim_drop(self, drop_id: int, user_id: int) -> str:
+        """"ok" — успел и получил приз, "again" — уже забирал, "late" — раздача закончилась."""
+        drop = await self.get_drop(drop_id)
+        if not drop or drop["closed"]:
+            return "late"
+        cur = await self.conn.execute(
+            "INSERT OR IGNORE INTO drop_claims(drop_id, user_id, claimed_at) "
+            "SELECT ?, ?, ? WHERE (SELECT COUNT(*) FROM drop_claims WHERE drop_id = ?) < ?",
+            (drop_id, user_id, int(time.time()), drop_id, drop["winners_max"]),
+        )
+        if not cur.rowcount:
+            await self.conn.commit()
+            claimed = await self.conn.execute(
+                "SELECT 1 FROM drop_claims WHERE drop_id = ? AND user_id = ?", (drop_id, user_id)
+            )
+            return "again" if await claimed.fetchone() else "late"
+        if drop["amount"]:
+            await self.conn.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (drop["amount"], user_id))
+        count = await self.conn.execute("SELECT COUNT(*) AS n FROM drop_claims WHERE drop_id = ?", (drop_id,))
+        if (await count.fetchone())["n"] >= drop["winners_max"]:
+            await self.conn.execute("UPDATE drops SET closed = 1 WHERE id = ?", (drop_id,))
+        await self.conn.commit()
+        return "ok"
+
+    async def drop_winners(self, drop_id: int) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute(
+            "SELECT c.user_id, u.name, u.username FROM drop_claims c JOIN users u ON u.id = c.user_id "
+            "WHERE c.drop_id = ? ORDER BY c.claimed_at, c.rowid",
+            (drop_id,),
+        )
+        return await cur.fetchall()
+
+    async def close_drop(self, drop_id: int) -> bool:
+        cur = await self.conn.execute("UPDATE drops SET closed = 1 WHERE id = ? AND closed = 0", (drop_id,))
+        await self.conn.commit()
+        return bool(cur.rowcount)
+
+    async def open_drops_older_than(self, ts: int) -> list[aiosqlite.Row]:
+        cur = await self.conn.execute("SELECT * FROM drops WHERE closed = 0 AND created_at < ?", (ts,))
+        return await cur.fetchall()

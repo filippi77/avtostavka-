@@ -21,7 +21,7 @@ from aiogram.types import (
     User,
 )
 
-from . import admin, betting, cards, duels, i18n, penalty, rating
+from . import activity, admin, betting, cards, duels, i18n, penalty, rating
 from . import tournament as tour
 from .access import SubscriptionChecker
 from .betting import describe_pick
@@ -43,7 +43,7 @@ def menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=t("btn_balance")), KeyboardButton(text=t("btn_bonus"))],
             [KeyboardButton(text=t("btn_rating")), KeyboardButton(text=t("btn_tournament"))],
             [KeyboardButton(text=t("btn_spin")), KeyboardButton(text=t("btn_buy"))],
-            [KeyboardButton(text=t("btn_help"))],
+            [KeyboardButton(text=t("btn_active")), KeyboardButton(text=t("btn_help"))],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -93,6 +93,9 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         lines.append(t("cab_bonus_ready") if wait <= 0 else t("cab_bonus_wait", wait=format_wait(wait)))
         spin_wait = user["last_spin"] + 86400 - int(time.time())
         lines.append(t("cab_spin_ready") if spin_wait <= 0 else t("cab_spin_wait", wait=format_wait(spin_wait)))
+        points, place = await db.activity_of(activity.week_of(cfg), user["id"])
+        if place:
+            lines.append(t("cab_active", points=points, place=place))
         w, l, d = await db.duel_stats(user["id"])
         if w or l or d:
             lines.append(t("cab_duels", w=w, l=l) + (t("cab_duels_draws", d=d) if d else ""))
@@ -111,7 +114,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         period = t("period_week") if cfg.bonus_period_days == 7 else t("period_days", days=cfg.bonus_period_days)
         return t(
             "help", suit=f"{cfg.payout_suit:g}", p=f"{cfg.payout_player:g}", b=f"{cfg.payout_banker:g}",
-            t=f"{cfg.payout_tie:g}", jackpot=cfg.spin_prizes[0], duel_line=duel_line,
+            t=f"{cfg.payout_tie:g}", jackpot=cfg.spin_prizes[0], duel_line=duel_line + t("help_active"),
             bonus_line=t("help_bonus", amount=cfg.bonus_amount, period=period),
         )
 
@@ -243,6 +246,7 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         except betting.BetError as e:
             await message.reply(str(e))
             return
+        await activity.add(cfg, db, message.from_user.id, activity.POINTS_BET)
         await message.reply(text)
 
     # --- турнир -------------------------------------------------------------
@@ -532,7 +536,12 @@ async def main() -> None:
         cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
     ))
     dp.include_router(build_router(cfg, db, subs))
+    # Последним: ловит обычные сообщения в чате для «Актива недели».
+    dp.include_router(activity.build_router(
+        cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
+    ))
     tasks = [
+        asyncio.create_task(activity.loop(cfg, db, bot)),
         asyncio.create_task(refund_loop(cfg, db)),
         asyncio.create_task(cards.window_loop(cfg, db, bot)),
         asyncio.create_task(duels.loop(cfg, db, bot)),
