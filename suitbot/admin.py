@@ -85,12 +85,9 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         for f in cards.CARD_FREQUENCIES
     ])
     duels_on = await duels.enabled(cfg, db)
-    confirm_on = await cards.confirm_enabled(cfg, db)
-    lines.append(f"Дуэли: {'✅ включены' if duels_on else '⛔️ выключены'} · "
-                 f"подтверждение ставок: {'✅' if confirm_on else '⛔️'}")
+    lines.append(f"Дуэли: {'✅ включены' if duels_on else '⛔️ выключены'}")
     rows.append([
         InlineKeyboardButton(text=f"⚔️ Дуэли: {'выключить' if duels_on else 'включить'}", callback_data="adm:duels"),
-        InlineKeyboardButton(text=f"🛡 Подтверждение: {'выкл' if confirm_on else 'вкл'}", callback_data="adm:confirm"),
     ])
     if duels_on:
         rows.append([InlineKeyboardButton(text="📢 Анонс дуэлей в чат", callback_data="adm:duelnews")])
@@ -208,10 +205,6 @@ def build_router(cfg: Config, db: DB) -> Router:
             on = await duels.enabled(cfg, db)
             await db.set_state("duels_enabled", "0" if on else "1")
             note = "Дуэли выключены." if on else "Дуэли включены."
-        elif action == "confirm":
-            on = await cards.confirm_enabled(cfg, db)
-            await db.set_state("bet_confirm", "0" if on else "1")
-            note = "Подтверждение ставок выключено." if on else "Подтверждение ставок включено."
         elif action == "duelnews":
             main_chat = await db.get_state("main_chat")
             if not main_chat:

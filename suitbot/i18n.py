@@ -159,11 +159,6 @@ TEXTS: dict[str, tuple[str, str]] = {
                     "Осталось {left} турнирных фишек",
                     "🏆 Turnir stavkasi qabul qilindi: #N{game} · {pick} · {amount} ×{coef} (yutuq {win}). "
                     "{left} turnir fishkasi qoldi"),
-    "bet_confirm": ("Ставка на #N{game}\n{pick} · {amount} {wallet}фишек · ×{coef} → выигрыш {win}\n\n"
-                    "Нажмите «{button}» ещё раз в течение {seconds} сек, чтобы подтвердить.",
-                    "#N{game} ga stavka\n{pick} · {amount} {wallet}fishka · ×{coef} → yutuq {win}\n\n"
-                    "Tasdiqlash uchun «{button}» ni {seconds} soniya ichida yana bosing."),
-    "wallet_tour_word": ("турнирных ", "turnir "),
     "stake_set": ("Сумма ставки: {stake}", "Stavka summasi: {stake}"),
     "wallet_tour_set": ("Ставлю турнирными фишками 🏆", "Turnir fishkalari bilan tikaman 🏆"),
     "wallet_main_set": ("Ставлю обычными фишками", "Oddiy fishkalar bilan tikaman"),

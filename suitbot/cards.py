@@ -179,15 +179,9 @@ async def window_loop(cfg: Config, db: DB, bot: Bot) -> None:
         await asyncio.sleep(2)
 
 
-async def confirm_enabled(cfg: Config, db: DB) -> bool:
-    return await db.get_state("bet_confirm", "1" if cfg.bet_confirm else "0") == "1"
-
-
 def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) -> Router:
     router = Router()
     rating_pressed: dict[int, float] = {}
-    # Ставка с карточки, ждущая второго нажатия: (игрок, чат, данные кнопки) -> до какого времени.
-    pending: dict[tuple[int, int, str], float] = {}
 
     @router.callback_query(F.data == "rate")
     async def on_rating(query: CallbackQuery) -> None:
@@ -227,32 +221,6 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             await query.answer(t("bet_started", game=game), show_alert=True)
             return
 
-        if await confirm_enabled(cfg, db):
-            # Первое нажатие показывает, на что ставка, второе — подтверждает.
-            key, now = (user["id"], chat_id, query.data), time.time()
-            if pending.pop(key, 0) < now:
-                for k in [k for k in pending if k[0] == user["id"] or pending[k] < now]:
-                    pending.pop(k)
-                pending[key] = now + cfg.bet_confirm_seconds
-                info = None
-                if kind in ("win", "total"):
-                    try:
-                        full_pick, coef, info = await betting.penalty_coef(cfg, db, int(game), kind, pick)
-                    except betting.BetError as e:
-                        await query.answer(str(e), show_alert=True)
-                        return
-                    button = betting.describe_pick(kind, full_pick, info)
-                else:
-                    full_pick, coef = pick, cfg.payout(kind, pick)
-                    button = suit_emoji(pick) if kind == "suit" else betting.side_name(pick).capitalize()
-                stake = user["pref_stake"]
-                await query.answer(
-                    t("bet_confirm", game=game, pick=betting.describe_pick(kind, full_pick, info), amount=stake,
-                      wallet=t("wallet_tour_word") if tournament_bet else "", coef=f"{coef:g}",
-                      win=int(stake * coef), button=button, seconds=cfg.bet_confirm_seconds),
-                    show_alert=True,
-                )
-                return
         try:
             text = await betting.place(
                 cfg, db, user["id"], chat_id, int(game), kind, pick, user["pref_stake"], tournament_bet
@@ -260,6 +228,7 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         except betting.BetError as e:
             await query.answer(str(e), show_alert=True)
             return
+        # Короткая плашка сверху на пару секунд — видит только нажавший, в чат ничего не пишется.
         await query.answer(text, show_alert=False)
         await refresh(cfg, db, bot, int(game), chat_id)
 

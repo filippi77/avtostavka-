@@ -91,10 +91,6 @@ class Config:
     # Язык для игроков по умолчанию (ru | uz); меняется в /admin.
     lang: str = os.getenv("BOT_LANG", "ru")
 
-    # Подтверждение ставки с карточки вторым нажатием (вкл/выкл ещё и в /admin).
-    bet_confirm: bool = os.getenv("BET_CONFIRM", "1") == "1"
-    bet_confirm_seconds: int = int(os.getenv("BET_CONFIRM_SECONDS", "15"))
-
     # Дуэли: включаются и выключаются в /admin, здесь — значение по умолчанию.
     duels_enabled: bool = os.getenv("DUELS_ENABLED", "1") == "1"
     # Сколько игр может длиться дуэль (выбирает вызывающий) и длина по умолчанию.
