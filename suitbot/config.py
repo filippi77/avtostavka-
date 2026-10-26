@@ -21,7 +21,7 @@ class Config:
     result_sources: set[int | str] = field(default_factory=lambda: _chats(os.getenv("RESULT_SOURCES", "")))
     admins: set[int] = field(default_factory=lambda: _ids(os.getenv("ADMINS", "")))
 
-    chips_per_star: int = int(os.getenv("CHIPS_PER_STAR", "1000"))
+    chips_per_star: int = int(os.getenv("CHIPS_PER_STAR", "100"))
     # Пакеты для покупки, в звёздах (минимум у Telegram — 1 звезда).
     star_packs: tuple[int, ...] = tuple(int(x) for x in os.getenv("STAR_PACKS", "1,5,10,50").split(",") if x.strip())
     # Контакт для вопросов по оплате (команда /paysupport, её требует Telegram).
@@ -128,14 +128,14 @@ class Config:
     # Магазин за фишки (в личке с ботом).
     shop_enabled: bool = os.getenv("SHOP_ENABLED", "1") == "1"
     shop_badges: tuple[str, ...] = tuple(os.getenv("SHOP_BADGES", "💎,🐉,🦁,⚡️,🔥,🍀,🎩,🦅").split(","))
-    shop_badge_price: int = int(os.getenv("SHOP_BADGE_PRICE", "10000"))
-    shop_title_price: int = int(os.getenv("SHOP_TITLE_PRICE", "30000"))
-    shop_custom_title_price: int = int(os.getenv("SHOP_CUSTOM_TITLE_PRICE", "50000"))
+    shop_badge_price: int = int(os.getenv("SHOP_BADGE_PRICE", "1000"))
+    shop_title_price: int = int(os.getenv("SHOP_TITLE_PRICE", "3000"))
+    shop_custom_title_price: int = int(os.getenv("SHOP_CUSTOM_TITLE_PRICE", "5000"))
     shop_title_days: int = int(os.getenv("SHOP_TITLE_DAYS", "7"))
-    shop_vip_price: int = int(os.getenv("SHOP_VIP_PRICE", "20000"))
+    shop_vip_price: int = int(os.getenv("SHOP_VIP_PRICE", "2000"))
     shop_vip_days: int = int(os.getenv("SHOP_VIP_DAYS", "7"))
     vip_max_bet: int = int(os.getenv("VIP_MAX_BET", "100000"))
-    shop_spin_price: int = int(os.getenv("SHOP_SPIN_PRICE", "1000"))
+    shop_spin_price: int = int(os.getenv("SHOP_SPIN_PRICE", "100"))
 
     def payout(self, kind: str, pick: str) -> float:
         if kind == "suit":
