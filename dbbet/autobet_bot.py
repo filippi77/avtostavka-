@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "26.10 07:50"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "26.10 08:10"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2812,7 +2812,8 @@ def kill_own_browser():
       prof = BROWSER_PROFILE.replace("'", "''")
       subprocess.run(
           ["powershell", "-NoProfile", "-Command",
-           "Get-CimInstance Win32_Process -Filter \"Name LIKE 'chrome%'\" | Where-Object {"
+           "Get-CimInstance Win32_Process -Filter \"Name LIKE 'chrome%' OR Name LIKE 'msedge%'\""
+           " | Where-Object {"
            f" $_.CommandLine -like '*--user-data-dir={prof}*' }} |"
            " ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
           timeout=30, capture_output=True,
@@ -2822,7 +2823,8 @@ def kill_own_browser():
                            timeout=10).stdout
       for line in out.splitlines():
         pid, _, args = line.strip().partition(" ")
-        if "chrom" in args.split(" ")[0] and f"--user-data-dir={BROWSER_PROFILE}" in args:
+        exe = args.split(" ")[0]
+        if ("chrom" in exe or "msedge" in exe) and f"--user-data-dir={BROWSER_PROFILE}" in args:
           try:
             os.kill(int(pid), 9)
           except Exception:
@@ -2831,34 +2833,59 @@ def kill_own_browser():
     print("Не удалось закрыть браузер бота:", e)
 
 
+_install = {"tried": False}
+
+
 def install_chromium():
-  """Ставит Chromium для Playwright (один раз, ~150 МБ, 1–3 минуты)."""
+  """Скачивает Chromium для Playwright — один раз за запуск бота."""
+  _install["tried"] = True
   send("⏳ Устанавливаю Chromium для своего браузера (1–3 минуты)…")
   r = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
                      capture_output=True, text=True, timeout=900)
   if r.returncode != 0:
     raise RuntimeError("установка Chromium не удалась: "
-                       + (r.stderr or r.stdout or "")[-300:])
+                       + (r.stderr or r.stdout or "").strip().splitlines()[-1][:200])
   send("✅ Chromium установлен.")
 
 
+def _no_browser_binary(e):
+  t = str(e)
+  return "Executable doesn't exist" in t or "playwright install" in t or "is not found" in t
+
+
 def launch_own_browser(p):
-  try:
-    return _launch_own_browser(p)
-  except Exception as e:
-    if "Executable doesn't exist" not in str(e) and "playwright install" not in str(e):
-      raise
-  install_chromium()  # Chromium ещё не скачан — ставим сами и запускаем снова
-  return _launch_own_browser(p)
+  """Свой браузер: Chromium от Playwright, если скачан; иначе Microsoft Edge,
+  который уже стоит в Windows; и только если нет обоих — один раз скачать Chromium."""
+  errors = []
+  for channel in (None, "msedge"):
+    try:
+      b = _launch_own_browser(p, channel)
+      _own["channel"] = channel or "chromium"
+      return b
+    except Exception as e:
+      if not _no_browser_binary(e):
+        raise
+      errors.append(str(e).splitlines()[0][:120])
+  if _install["tried"]:
+    raise RuntimeError("нет ни Chromium, ни Edge: " + " | ".join(errors))
+  install_chromium()
+  b = _launch_own_browser(p, None)
+  _own["channel"] = "chromium"
+  return b
 
 
-def _launch_own_browser(p):
+_own = {"channel": None}
+
+
+def _launch_own_browser(p, channel=None):
   kill_own_browser()  # хвост от прошлого запуска держит профиль
   device = dict(p.devices.get(BROWSER_DEVICE) or {})
   device.pop("default_browser_type", None)
+  extra = {"channel": channel} if channel else {}
   ctx = p.chromium.launch_persistent_context(
       BROWSER_PROFILE,
       headless=False,
+      **extra,
       proxy=_proxy_settings(BROWSER_PROXY),
       locale="ru-RU",
       args=[
@@ -2878,7 +2905,9 @@ def browser_mode():
 
 
 def browser_name():
-  return "свой Chromium" if browser_mode() == "own" else "Opera"
+  if browser_mode() != "own":
+    return "Opera"
+  return "свой Edge" if _own["channel"] == "msedge" else "свой Chromium"
 
 
 JOB_HANG_LIMIT = 300  # сек: дольше задание идти не может — значит, браузер завис
@@ -2948,11 +2977,12 @@ def browser_worker():
           adopt_tab(browser)
         except Exception as e:
           print("Браузер не запустился:", e)
-          if browser_mode() == "own" and not _launch_warned.get("done"):
-            _launch_warned["done"] = True
+          if browser_mode() == "own":
+            with lock:
+              state["browser_mode"] = "opera"
+              save_state()
             send(f"❌ Свой браузер не запустился: <code>{html.escape(str(e)[:300])}</code>"
-                 "\nЕсли Chromium не установлен: <code>playwright install chromium</code>."
-                 " Вернуться на Opera: /browser opera")
+                 "\nВернулся на Opera. Попробовать снова: /browser own")
           browser = None
           execute_job(job)
           continue
