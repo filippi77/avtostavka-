@@ -18,7 +18,7 @@ from playwright.sync_api import sync_playwright
 from telebot import types
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "26.10 06:10"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "26.10 07:00"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +63,15 @@ if not BOT_TOKEN or not ADMIN_ID:
   )
 
 CDP_URL = "http://127.0.0.1:9222"  # порт отладки Opera
+
+# Браузер: "own" — бот сам запускает свой Chromium (отдельный профиль, мобильная
+# версия сайта, сам перезапускает при зависании); "opera" — подключение к Opera
+# по порту отладки. Переключается командой /browser own | opera.
+BROWSER_PROFILE = os.path.join(BOT_DIR, "browser_profile")
+# Прокси/VPN только для браузера бота: socks5://логин:пароль@хост:порт или
+# http://логин:пароль@хост:порт. Пусто — без прокси (например, VPN на весь компьютер).
+BROWSER_PROXY = os.environ.get("AUTOBET_PROXY", "")
+BROWSER_DEVICE = "Pixel 7"  # какой телефон изображает браузер (мобильная версия сайта)
 
 # Автовход, если сайт разлогинил (пусто — не входить)
 LOGIN_ID = os.environ.get("AUTOBET_LOGIN_ID", "")  # E-mail или ID
@@ -212,6 +221,7 @@ def default_state():
       "daily_loss_limit": DAILY_LOSS_LIMIT,
       "games": {"tennis": True, "penalty": True, "g21": True},
       "g21_channel": None,
+      "browser_mode": "opera",  # own | opera
       "pen_base_stake": PEN_BASE_STAKE,
       "pen_multiplier": PEN_MULTIPLIER,
       "pen_max_steps": PEN_MAX_STEPS,
@@ -2684,6 +2694,113 @@ def ensure_login(page):
       pass
 
 
+# ---------- свой браузер (Chromium, запускает бот) ----------
+
+class OwnBrowser:
+  """Обёртка над persistent-контекстом Chromium с тем же интерфейсом, что у
+  браузера Opera по CDP: .contexts, .is_connected(), .new_context()."""
+
+  def __init__(self, ctx):
+    self.ctx = ctx
+    self.closed = False
+    ctx.on("close", lambda *_: setattr(self, "closed", True))
+
+  @property
+  def contexts(self):
+    return [] if self.closed else [self.ctx]
+
+  def is_connected(self):
+    if self.closed:
+      return False
+    try:
+      self.ctx.cookies("https://example.com")  # запрос в браузер: умер — будет ошибка
+      return True
+    except Exception:
+      self.closed = True
+      return False
+
+  def new_context(self):
+    return self.ctx
+
+  def close(self):
+    try:
+      self.ctx.close()
+    except Exception:
+      pass
+    self.closed = True
+
+
+def _proxy_settings(url):
+  """socks5://user:pass@host:port → настройки прокси для Playwright."""
+  if not url:
+    return None
+  u = urlparse(url)
+  out = {"server": f"{u.scheme}://{u.hostname}:{u.port}"}
+  if u.username:
+    out["username"] = u.username
+    out["password"] = u.password or ""
+  return out
+
+
+def kill_own_browser():
+  """Принудительно закрывает Chromium бота (по папке профиля): зависший браузер
+  иначе держит задание вечно, а профиль занят и новый не запустится.
+  Ищем только процессы chrome с этим --user-data-dir, а не всё, где встречается
+  путь, — иначе команда закрыла бы сама себя."""
+  import subprocess
+  try:
+    if os.name == "nt":
+      prof = BROWSER_PROFILE.replace("'", "''")
+      subprocess.run(
+          ["powershell", "-NoProfile", "-Command",
+           "Get-CimInstance Win32_Process -Filter \"Name LIKE 'chrome%'\" | Where-Object {"
+           f" $_.CommandLine -like '*--user-data-dir={prof}*' }} |"
+           " ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+          timeout=30, capture_output=True,
+      )
+    else:
+      out = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True,
+                           timeout=10).stdout
+      for line in out.splitlines():
+        pid, _, args = line.strip().partition(" ")
+        if "chrom" in args.split(" ")[0] and f"--user-data-dir={BROWSER_PROFILE}" in args:
+          try:
+            os.kill(int(pid), 9)
+          except Exception:
+            pass
+  except Exception as e:
+    print("Не удалось закрыть браузер бота:", e)
+
+
+def launch_own_browser(p):
+  kill_own_browser()  # хвост от прошлого запуска держит профиль
+  device = dict(p.devices.get(BROWSER_DEVICE) or {})
+  device.pop("default_browser_type", None)
+  ctx = p.chromium.launch_persistent_context(
+      BROWSER_PROFILE,
+      headless=False,
+      proxy=_proxy_settings(BROWSER_PROXY),
+      locale="ru-RU",
+      args=[
+          "--no-first-run",
+          "--disable-extensions",
+          "--disable-gpu",  # меньше сбоев отрисовки и памяти
+          "--disable-features=Translate,MediaRouter",
+          "--disable-background-networking",
+      ],
+      **device,
+  )
+  return OwnBrowser(ctx)
+
+
+def browser_mode():
+  return "own" if state.get("browser_mode") == "own" else "opera"
+
+
+def browser_name():
+  return "свой Chromium" if browser_mode() == "own" else "Opera"
+
+
 JOB_HANG_LIMIT = 300  # сек: дольше задание идти не может — значит, браузер завис
 _busy = {"since": None, "what": ""}
 
@@ -2695,7 +2812,16 @@ def watchdog_loop():
   while True:
     time.sleep(10)
     since = _busy["since"]
-    if since and time.time() - since > JOB_HANG_LIMIT:
+    if since and time.time() - since > JOB_HANG_LIMIT and browser_mode() == "own" \
+        and not _busy.get("killed"):
+      # свой браузер можно перезапустить, не трогая бота: зависшая команда
+      # получит ошибку, и бот запустит браузер заново
+      _busy["killed"] = True
+      send(f"🔴 Браузер не отвечает {int(time.time() - since)} с"
+           f" (задание: {html.escape(_busy['what'])}). Перезапускаю браузер.")
+      kill_own_browser()
+      continue
+    if since and time.time() - since > JOB_HANG_LIMIT + (90 if _busy.get("killed") else 0):
       send(
           f"🔴 Браузер не отвечает {int(time.time() - since)} с"
           f" (задание: {html.escape(_busy['what'])}). Перезапускаю бота — если он"
@@ -2712,26 +2838,45 @@ def _job_title(job):
     return "?"
 
 
+_launch_warned = {"done": False}
+
+
 def browser_worker():
   p = None
   browser = None
+  mode = browser_mode()
   while True:
     job = jobs.get()
-    _busy["since"], _busy["what"] = time.time(), _job_title(job)
+    _busy["since"], _busy["what"], _busy["killed"] = time.time(), _job_title(job), False
     try:
       if job["fn"] == job_result:
         execute_job(job)
         continue
+      if browser is not None and mode != browser_mode():
+        if isinstance(browser, OwnBrowser):
+          browser.close()
+        browser = None  # режим переключили командой /browser
       if browser is None or not browser.is_connected():
         try:
           if p is None:
             p = sync_playwright().start()
-          browser = p.chromium.connect_over_cdp(CDP_URL, timeout=5000)
+          mode = browser_mode()
+          if mode == "own":
+            browser = launch_own_browser(p)
+          else:
+            browser = p.chromium.connect_over_cdp(CDP_URL, timeout=5000)
           adopt_tab(browser)
-        except Exception:
+        except Exception as e:
+          print("Браузер не запустился:", e)
+          if browser_mode() == "own" and not _launch_warned.get("done"):
+            _launch_warned["done"] = True
+            send(f"❌ Свой браузер не запустился: <code>{html.escape(str(e)[:300])}</code>"
+                 "\nЕсли Chromium не установлен: <code>playwright install chromium</code>."
+                 " Вернуться на Opera: /browser opera")
           browser = None
           execute_job(job)
           continue
+        _launch_warned["done"] = False
       page = fresh_page(browser)
       ensure_login(page)
       execute_job(job, page)
@@ -2756,7 +2901,7 @@ def browser_worker():
 
 def job_test(page, job):
   if not page:
-    send(f"❌ Не удалось открыть вкладку {cur_site()} в Opera.")
+    send(f"❌ Не удалось открыть вкладку {cur_site()} ({browser_name()}).")
     return
   shot = page.screenshot()
   bal = get_site_balance(page)
@@ -2767,7 +2912,7 @@ def job_test(page, job):
       )
       else " ПК-версия (нужна мобильная!)"
   )
-  cap = f"✅ Браузер на связи\n{page.url}\n{mob}"
+  cap = f"✅ Браузер на связи ({browser_name()})\n{page.url}\n{mob}"
   if bal is not None:
     cap += f"\nБаланс на сайте: {money(bal)}"
   bot.send_photo(ADMIN_ID, shot, caption=cap)
@@ -3410,7 +3555,7 @@ def mark_site(reason):
 
 def job_health(page, job):
   if not page:
-    mark_site("Opera не отвечает (порт отладки 9222) или вкладка не открыта")
+    mark_site(f"{browser_name()} не отвечает или вкладка не открыта")
     return
   try:
     open_league(page)
@@ -3596,6 +3741,10 @@ def status_text():
           f"{name} {'✅' if game_on(g) else '⛔️'}" for g, name in GAMES.items()
       )
       + "\n"
+      + "Браузер: "
+      + browser_name()
+      + (" · прокси" if browser_mode() == "own" and BROWSER_PROXY else "")
+      + "\n"
       + "Мин. КФ: "
       + st_min_odds
       + " | Стоп за день: "
@@ -3681,6 +3830,23 @@ def cmd_limit(msg):
     state["daily_loss_limit"] = val
     save_state()
   send(f"Дневной стоп-лосс: {limit_text()}")
+
+
+@bot.message_handler(commands=["browser"])
+def cmd_browser(msg):
+  """/browser own — свой Chromium, /browser opera — Opera по порту отладки."""
+  if msg.from_user.id != ADMIN_ID:
+    return
+  parts = (msg.text or "").split()
+  if len(parts) != 2 or parts[1].lower() not in ("own", "opera"):
+    send(f"Сейчас: {browser_name()}\n/browser own — свой Chromium (бот запускает сам)"
+         "\n/browser opera — Opera по порту отладки")
+    return
+  with lock:
+    state["browser_mode"] = parts[1].lower()
+    save_state()
+  send(f"🌐 Браузер: {browser_name()}. Переключусь на следующем задании —"
+       " нажми «Тест браузера», чтобы проверить сразу.")
 
 
 @bot.message_handler(commands=["vbank"])
