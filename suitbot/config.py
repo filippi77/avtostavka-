@@ -129,10 +129,10 @@ class Config:
     shop_enabled: bool = os.getenv("SHOP_ENABLED", "1") == "1"
     shop_badges: tuple[str, ...] = tuple(os.getenv("SHOP_BADGES", "💎,🐉,🦁,⚡️,🔥,🍀,🎩,🦅").split(","))
     shop_badge_price: int = int(os.getenv("SHOP_BADGE_PRICE", "1000"))
-    shop_title_price: int = int(os.getenv("SHOP_TITLE_PRICE", "3000"))
-    shop_custom_title_price: int = int(os.getenv("SHOP_CUSTOM_TITLE_PRICE", "5000"))
+    shop_title_price: int = int(os.getenv("SHOP_TITLE_PRICE", "10000"))
+    shop_custom_title_price: int = int(os.getenv("SHOP_CUSTOM_TITLE_PRICE", "15000"))
     shop_title_days: int = int(os.getenv("SHOP_TITLE_DAYS", "7"))
-    shop_vip_price: int = int(os.getenv("SHOP_VIP_PRICE", "2000"))
+    shop_vip_price: int = int(os.getenv("SHOP_VIP_PRICE", "5000"))
     shop_vip_days: int = int(os.getenv("SHOP_VIP_DAYS", "7"))
     vip_max_bet: int = int(os.getenv("VIP_MAX_BET", "100000"))
     shop_spin_price: int = int(os.getenv("SHOP_SPIN_PRICE", "100"))
