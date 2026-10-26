@@ -18,7 +18,7 @@ from playwright.sync_api import sync_playwright
 from telebot import types
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "25.10 23:00"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "26.10 06:10"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2529,15 +2529,10 @@ def close_extra_tabs(browser, keep):
 
 
 def adopt_tab(browser):
-  """После (пере)подключения к Opera берём уже открытую живую вкладку DB Bet,
-  а не открываем ещё одну: объекты вкладок от старого подключения недействительны."""
+  """После (пере)подключения к Opera старые вкладки DB Bet не трогаем скриптами:
+  зависшая вкладка не отвечает, и бот повис бы вместе с ней. fresh_page откроет
+  новую вкладку и закроет остальные (закрытие работает и для зависших)."""
   _tab["page"], _tab["uses"] = None, 0
-  for ctx in browser.contexts:
-    for pg in ctx.pages:
-      if _is_dbbet_url(pg.url) and pg.url.startswith("http") and not _tab_dead(pg):
-        _tab["page"] = pg
-        close_extra_tabs(browser, pg)
-        return pg
   return None
 
 
@@ -2689,11 +2684,40 @@ def ensure_login(page):
       pass
 
 
+JOB_HANG_LIMIT = 300  # сек: дольше задание идти не может — значит, браузер завис
+_busy = {"since": None, "what": ""}
+
+
+def watchdog_loop():
+  """Если браузер завис (вкладка не отвечает), задание висит вечно и бот молча
+  перестаёт ставить. Тогда сообщаем и перезапускаем бота — Skript Manager
+  запустит его заново, бот откроет новую вкладку, а зависшую закроет."""
+  while True:
+    time.sleep(10)
+    since = _busy["since"]
+    if since and time.time() - since > JOB_HANG_LIMIT:
+      send(
+          f"🔴 Браузер не отвечает {int(time.time() - since)} с"
+          f" (задание: {html.escape(_busy['what'])}). Перезапускаю бота — если он"
+          " не поднимется сам, запусти его заново и проверь Opera."
+      )
+      os._exit(3)
+
+
+def _job_title(job):
+  try:
+    sig = job.get("sig")
+    return describe(sig) if sig else getattr(job.get("fn"), "__name__", "?")
+  except Exception:
+    return "?"
+
+
 def browser_worker():
   p = None
   browser = None
   while True:
     job = jobs.get()
+    _busy["since"], _busy["what"] = time.time(), _job_title(job)
     try:
       if job["fn"] == job_result:
         execute_job(job)
@@ -2726,6 +2750,7 @@ def browser_worker():
       )
       traceback.print_exc()
     finally:
+      _busy["since"] = None
       jobs.task_done()
 
 
@@ -4372,6 +4397,7 @@ if __name__ == "__main__":
   threading.Thread(target=browser_worker, daemon=True).start()
   threading.Thread(target=daily_report_loop, daemon=True).start()
   threading.Thread(target=health_loop, daemon=True).start()
+  threading.Thread(target=watchdog_loop, daemon=True).start()
   try:
     hello = bot.send_message(
         ADMIN_ID,
