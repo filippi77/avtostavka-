@@ -4,6 +4,7 @@
 # Управление кнопками в личке с ботом: /panel
 # Установка: pip install pyTelegramBotAPI anthropic
 
+import html
 import json
 import os
 import random
@@ -1291,14 +1292,36 @@ def auto21_flush():
     def worker():
         b = PERSONAS[0].get("bot")
         for line in lines:
+            err = None
             for attempt in range(3):
                 try:
                     b.send_message(AUTO21_CHANNEL, line)
+                    err = None
                     break
                 except Exception as e:
+                    err = e
                     print("AUTO21 отправка:", e)
                     time.sleep(2)
+            if err is None:
+                _auto21_stat["sent"] += 1
+                _auto21_stat["last_ok"] = time.strftime("%d.%m %H:%M")
+                continue
+            _auto21_stat["errors"] += 1
+            _auto21_stat["last_err"] = str(err)[:150]
+            # о сбое — админу в личку, не чаще раза в 10 минут
+            if time.time() - _auto21_stat["warned"] > 600:
+                _auto21_stat["warned"] = time.time()
+                for admin in ADMIN_IDS:
+                    try:
+                        b.send_message(admin, "⚠️ AUTO21: не могу отправить сигнал в канал"
+                                       f" автоставки {AUTO21_CHANNEL}: {str(err)[:200]}\n"
+                                       "Проверь, что Влад — админ канала с правом публикации.")
+                    except Exception:
+                        pass
     threading.Thread(target=worker, daemon=True).start()
+
+
+_auto21_stat = {"sent": 0, "errors": 0, "last_ok": "—", "last_err": "", "warned": 0.0}
 
 
 def auto21_add(line):
@@ -1505,7 +1528,11 @@ def process_grox(chat_id, text):
 
 
 def grox_panel_text():
+    st = _auto21_stat
     lines = ["🥇 <b>21GROX</b> — работает всегда\n",
+             f"📡 Автоставка (канал {AUTO21_CHANNEL}): отправлено {st['sent']},"
+             f" последнее {st['last_ok']}, ошибок {st['errors']}"
+             + (f" — {html.escape(st['last_err'])}" if st["last_err"] else ""),
              f"Догон ставок: {('×' + format(float(cfg['grox_mult']), 'g')) if cfg.get('grox_mult') else 'стандарт'}",
              f"Сигнал: масти нет у Игрока {grox_need()} игр подряд → линии догоном:"]
     for k, em, stk, _ in GROX_LINES:
