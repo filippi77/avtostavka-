@@ -1115,6 +1115,7 @@ def void_stale_rows(chat_id, text):
 def finished_history(chat_id, n=30):
     """Последние законченные игры канала по порядку: [(номер, текст), ...]."""
     seen = {}
+    newest = None                               # номер самой свежей игры (по порядку постов)
     for t in list(posts[chat_id].values()):
         if not game_is_finished(t):
             continue
@@ -1124,10 +1125,23 @@ def finished_history(chat_id, n=30):
             continue
         if g:
             seen[g] = t
+            newest = g
     games = sorted(seen.items())
-    for i in range(len(games) - 1, 0, -1):      # после сброса нумерации — только новый цикл
-        if games[i][0] - games[i - 1][0] > 50:
-            games = games[i:]
+    # После сброса нумерации (…1439, 1440 → 1, 2, 3) в памяти два цикла игр.
+    # Берём тот, где самая свежая игра: новый цикл с маленькими номерами стоит в
+    # начале сортировки, а не в конце — иначе бот считал масти по старым играм
+    # и до вытеснения старых постов (~час) сигналов не было.
+    segments, cur = [], []
+    for item in games:
+        if cur and item[0] - cur[-1][0] > 50:
+            segments.append(cur)
+            cur = []
+        cur.append(item)
+    if cur:
+        segments.append(cur)
+    for seg in segments:
+        if newest is not None and any(g == newest for g, _ in seg):
+            games = seg
             break
     return games[-n:]
 
