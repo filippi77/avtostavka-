@@ -1226,8 +1226,11 @@ def grox_state(chat_id):
     st.setdefault("bank", 0.0)          # общий плюс/минус
     st.setdefault("start", st["bank"])  # плюс на начало текущего поста
     st.setdefault("stats", {})
+    st.setdefault("profit", {})         # плюс/минус по каждому рынку
+    st.setdefault("profit_since", time.strftime("%d.%m"))
     for k, _, _, _ in GROX_LINES:
         st["stats"].setdefault(k, [0, 0])
+        st["profit"].setdefault(k, 0.0)
     return st
 
 
@@ -1408,8 +1411,13 @@ def grox_text(chat_id, start):
         tot = sum(r.get("result", 0) for r in rows)
         lines.append(f"🏁 Итог сигнала: <b>{sg(tot)}</b>")
     lines.append(f"💰 Всего: <b>{sg(st['bank'])}</b>")
-    lines.append("📊 " + "   ".join(f"{GROX_LABEL.get(k, k).split()[0]} {st['stats'][k][0]}✅/{st['stats'][k][1]}❌"
-                                    for k, _, _, _ in GROX_LINES))
+    # по рынкам — только включённые (выключенные не ставятся, их счёт не нужен)
+    on = [k for k, _, _, _ in GROX_LINES if grox_enabled(k)]
+    if on:
+        lines.append(f"📊 По рынкам (плюс с {st.get('profit_since', '')}):")
+        for k in on:
+            w, l = st["stats"][k]
+            lines.append(f"{GROX_LABEL.get(k, k)}: {w}✅/{l}❌ · <b>{sg(st['profit'].get(k, 0.0))}</b>")
     return "\n".join(lines)
 
 
@@ -1490,6 +1498,7 @@ def process_grox(chat_id, text):
             st["stats"][r["key"]][1] += 1
         if r["status"] in ("✅", "❌"):
             st["bank"] = round(st["bank"] + r["result"], 2)
+            st["profit"][r["key"]] = round(st["profit"].get(r["key"], 0.0) + r["result"], 2)
         if r["key"] in AUTO21_OUT and r.get("sid") and (r["sid"], g) in _auto21_early:
             if r["status"] == "✅":
                 print(f"AUTO21: {r['sid']} #{g} — по ходу игры был промах, а в итоге заход")
