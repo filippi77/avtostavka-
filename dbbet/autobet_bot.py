@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "26.10 08:10"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "27.10 02:30"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -826,6 +826,19 @@ class SkipSignal(RuntimeError):
   """Сигнал пропускается сразу, без повторных попыток."""
 
 
+class Preempted(Exception):
+  """Поиск матча прерван: в очереди ставка 21 очко (игра раз в минуту, ждать нельзя).
+  Задание возвращается в очередь и продолжится после неё."""
+
+
+_cur_job = {"game": None}
+
+
+def yield_to_21():
+  if _cur_job["game"] != "g21" and jobs.urgent_waiting():
+    raise Preempted()
+
+
 class SiteDown(RuntimeError):
   pass
 
@@ -1545,6 +1558,7 @@ def pen_find_match(page, sig):
   deadline = time.time() + PEN_SEARCH_WAIT
   first = True
   while time.time() < deadline:
+    yield_to_21()  # ждёт сигнал 21 очко — пенальти подождут
     if not first:
       # матч мог ещё не появиться на сайте — обновляем поиск и ищем снова
       page.wait_for_timeout(8000)
@@ -1556,6 +1570,7 @@ def pen_find_match(page, sig):
     page.wait_for_timeout(2500)
     # список может показывать только видимую часть — ищем на каждом шаге прокрутки
     for _ in range(40):
+      yield_to_21()  # ждёт сигнал 21 очко — пенальти подождут
       try:
         res = page.evaluate(PEN_FIND_JS, [a1, a2])
       except Exception as e:
@@ -1735,6 +1750,7 @@ def prepare_pen_bet(page, sig, stake):
   deadline = time.time() + PEN_SEARCH_WAIT
   first = True
   while time.time() < deadline:
+    yield_to_21()  # ждёт сигнал 21 очко — пенальти подождут
     if not first:
       # матч мог ещё не появиться — ждём и заново вводим поиск (без перезагрузки)
       page.wait_for_timeout(8000)
@@ -1758,6 +1774,7 @@ def prepare_pen_bet(page, sig, stake):
     # 1) просматриваем ВЕСЬ список: все карточки с нужными командами и их КФ
     allc = {}
     for _ in range(40):
+      yield_to_21()  # ждёт сигнал 21 очко — пенальти подождут
       try:
         cards = page.evaluate(PEN_CARDS_JS, [a1, a2, label])
       except Exception:
@@ -1802,6 +1819,7 @@ def prepare_pen_bet(page, sig, stake):
       page.wait_for_timeout(400)
       clicked = None
       for _ in range(40):
+        yield_to_21()  # ждёт сигнал 21 очко — пенальти подождут
         try:
           cards = page.evaluate(PEN_CARDS_JS, [a1, a2, label])
         except Exception:
@@ -3041,6 +3059,7 @@ def warn_last_step(sig):
 def job_bet(page, job):
   sig = job["sig"]
   game = game_of(sig)
+  _cur_job["game"] = game
   stake = stake_for(sig["step"], game, sig.get("market"))
   title = html.escape(sig["players"] or "матч не распознан")
 
@@ -3227,6 +3246,15 @@ def job_bet(page, job):
           " /confirm ID placed КФ или /confirm ID cancel.",
           parse_mode="HTML",
       )
+      return
+
+    except Preempted:
+      try:
+        clear_coupon(page)
+      except Exception:
+        pass
+      print(f"⏸ {describe(sig)}: уступаю очередь ставке 21 очко, вернусь позже")
+      jobs.put(job)  # продолжит после 21 очко (устаревшее отсеется по времени)
       return
 
     except SiteDown as e:
