@@ -1569,7 +1569,12 @@ def a21k_flush():
 _A21K_CARD_RE = re.compile(r"(10|[2-9JQKA])\s*[♠♣♥❤♦]")
 
 
-def a21k_lost_early(key, cards, pts):
+# (чат, игра) → сколько карт было у Дилера, когда игру увидели впервые: Дилер
+# «начал брать», когда карт у него стало больше — значит, Игрок уже закончил.
+_a21k_dealer0 = {}
+
+
+def a21k_lost_early(key, cards, pts, dealer0=None):
     """По ходу игры линия уже точно не заходит — ставку на следующую игру можно
     отправить сразу, не дожидаясь итога (в 21 Классике следующая игра начинается
     почти сразу, по итогу бот не успевает).
@@ -1582,9 +1587,10 @@ def a21k_lost_early(key, cards, pts):
     if key == "g":    # у обоих видны первые две карты, и ни у кого не два туза
         return (len(pl) >= 2 and len(dl) >= 2
                 and not any(c[0] == "A" and c[1] == "A" for c in (pl, dl)))
-    if key == "c4":   # у Игрока уже 5+ карт, или Игрок закончил (перебор / добирает
-        #             Дилер) не на 4 картах
-        player_done = p_pts > 21 or len(dl) >= 3
+    if key == "c4":   # у Игрока уже 5+ карт, или Игрок закончил (перебор / Дилер
+        #             начал брать карты) на 2–3 картах
+        dealer_draws = len(dl) >= 3 or (dealer0 is not None and len(dl) > dealer0)
+        player_done = p_pts > 21 or dealer_draws
         return len(pl) >= 5 or (player_done and len(pl) != 4)
     if key == "x":    # перебор у одного из них — ничьей уже не будет
         return p_pts > 21 or d_pts > 21
@@ -1603,6 +1609,11 @@ def a21k_early(chat_id, text):
         return
     cards = [_A21K_CARD_RE.findall(h) for h in re.findall(r"\(([^)]*)\)", text or "")[:2]]
     pts = [int(x) for x in re.findall(r"(\d+)\s*\(", text or "")[:2]]
+    if len(cards) == 2 and (chat_id, g) not in _a21k_dealer0:
+        _a21k_dealer0[(chat_id, g)] = len(cards[1])
+        for old in [k for k in _a21k_dealer0 if k[0] == chat_id and abs(k[1] - g) > 20]:
+            _a21k_dealer0.pop(old, None)
+    dealer0 = _a21k_dealer0.get((chat_id, g))
     with column_lock:
         st = grox_state(chat_id)
         for r in st["rows"]:
@@ -1611,7 +1622,7 @@ def a21k_early(chat_id, text):
             n = g - r["start"] + 1
             if n < 1 or n > len(r["stakes"]) or (r["sid"], g) in _a21k_early:
                 continue
-            if not a21k_lost_early(r["key"], cards, pts):
+            if not a21k_lost_early(r["key"], cards, pts, dealer0):
                 continue
             _a21k_early.add((r["sid"], g))
             a21k_add(a21k_line("RESULT", r, g, win=0))
