@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "31.10 12:40"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 13:00"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -235,6 +235,7 @@ G21K_OUTCOMES = {
 # проигранное в ней и приносит первую ставку × (КФ − 1). Здесь — первая ставка.
 G21K_BASE = {"ГОЛД": 25, "НИЧЬЯ": 50, "4КАРТЫ": 50}
 G21K_MAX_STEPS = 10
+G21K_MAX_ODDS_DIFF = 0.7  # КФ «плавает» от игры к игре: не ставим только при совсем другом КФ
 
 # Карточные игры с сигналами из своего канала: настройки по игре
 CARD_GAMES = {
@@ -2269,7 +2270,13 @@ def prepare_21_bet(page, sig, stake):
   if odds < get_min_odds():
     raise SkipSignal(f"КФ {odds} ниже минимума {get_min_odds()}")
   want = sig.get("odds")
-  if want and abs(odds - want) / want > G21_MAX_ODDS_DIFF:
+  if game == "g21k":
+    # в 21 Классике КФ меняется от игры к игре, а «Алекс» шлёт средний — сверяем
+    # только грубые ошибки, а ставку «на отбой» считаем по КФ, который сейчас на сайте
+    if want and abs(odds - want) / want > G21K_MAX_ODDS_DIFF:
+      raise SkipSignal(f"КФ на сайте {odds}, в сигнале {want} — похоже, не тот рынок")
+    stake = g21k_stake(dict(sig, odds=odds))
+  elif want and abs(odds - want) / want > G21_MAX_ODDS_DIFF:
     raise SkipSignal(f"КФ на сайте {odds}, в сигнале {want} — слишком большая разница")
 
   page.mouse.click(btn["x"], btn["y"])
