@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "27.10 02:30"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 12:00"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -203,10 +203,11 @@ PEN_TEAMS = {
 G21_CHANNEL = int(os.environ.get("AUTOBET_G21_CHANNEL", "-1004380611765") or 0)  # «21 очко автоставка»
 G21_SEARCH_PATH = "/ru/search-events?searchtext=21+ochko"
 G21_GAME_TITLE = "21 Очко"
-# код исхода в сигнале → (рынок в боте, заголовок блока на сайте, слово в купоне)
+# код исхода в сигнале → (рынок в боте, заголовок блока на сайте, слово в купоне,
+# подпись кнопки в блоке)
 G21_OUTCOMES = {
-    "G": ("ГОЛД", 'Будет "золотое очко"', "золотое очко"),
-    "R": ("РАЗДАЧА", "Игра завершится на раздаче", "раздаче"),
+    "G": ("ГОЛД", 'Будет "золотое очко"', "золотое очко", "Да"),
+    "R": ("РАЗДАЧА", "Игра завершится на раздаче", "раздаче", "Да"),
 }
 # лесенки догона: последний шаг — максимум сайта (если лимит в купоне меньше — ставим лимит)
 G21_LADDERS = {
@@ -222,8 +223,32 @@ G21_FIND_TIMEOUT = 40  # сек ждём, пока игра появится в 
 G21_SIGNAL_MAX_AGE = 10 * 60
 PEN_SIGNAL_MAX_AGE = 4 * 60
 
-GAMES = {"tennis": "🏓 Теннис", "penalty": "⚽ Пенальти", "g21": "🃏 21 очко"}
-MARKETS = ("ТМ", "ТБ", "П1", "П2", "ГОЛД", "РАЗДАЧА")
+# ----- 🂡 21 Классика (сигналы AUTO21K от бота «Алекс») -----
+G21K_CHANNEL = int(os.environ.get("AUTOBET_G21K_CHANNEL", "0") or 0)
+G21K_GAME_TITLE = "21 Классика"
+G21K_OUTCOMES = {
+    "G": ("ГОЛД", 'Будет "золотое очко"', "золотое очко", "Да"),
+    "X": ("НИЧЬЯ", "1X2", "ничья", "Ничья"),
+    "O": ("21ОЧКО", "В игре будет набрано 21 очко", "21 очко", "Да"),
+    "P4": ("4КАРТЫ", "Игрок, точное количество карт", "количество карт", "4"),
+    "B": ("ПЕРЕБОР", "Игра закончится перебором", "перебор", "Да"),
+}
+# Ставка 21 Классики — «на отбой»: каждая ставка цепочки возвращает всё
+# проигранное в ней и приносит первую ставку × (КФ − 1). Здесь — первая ставка.
+G21K_BASE = {"ГОЛД": 25, "НИЧЬЯ": 50, "21ОЧКО": 100, "4КАРТЫ": 50, "ПЕРЕБОР": 100}
+G21K_MAX_STEPS = 10
+
+# Карточные игры с сигналами из своего канала: настройки по игре
+CARD_GAMES = {
+    "g21": {"name": "🃏 21 очко", "title": G21_GAME_TITLE, "prefix": "AUTO21",
+            "channel": G21_CHANNEL, "outcomes": G21_OUTCOMES},
+    "g21k": {"name": "🂡 21 Классика", "title": G21K_GAME_TITLE, "prefix": "AUTO21K",
+             "channel": G21K_CHANNEL, "outcomes": G21K_OUTCOMES},
+}
+
+GAMES = {"tennis": "🏓 Теннис", "penalty": "⚽ Пенальти", "g21": "🃏 21 очко",
+         "g21k": "🂡 21 Классика"}
+MARKETS = ("ТМ", "ТБ", "П1", "П2", "ГОЛД", "РАЗДАЧА", "НИЧЬЯ", "21ОЧКО", "4КАРТЫ", "ПЕРЕБОР")
 # ===============================================
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML", threaded=False)
@@ -241,7 +266,7 @@ class JobQueue(queue.Queue):
 
   def _put(self, job):
     payload = job.get("sig") or job.get("result") or {}
-    (self.urgent if payload.get("game") == "g21" else self.normal).append(job)
+    (self.urgent if payload.get("game") in CARD_GAMES else self.normal).append(job)
 
   def _get(self):
     return self.urgent.popleft() if self.urgent else self.normal.popleft()
@@ -279,8 +304,9 @@ def default_state():
       "max_steps": MAX_STEPS,
       "min_odds": MIN_ODDS,
       "daily_loss_limit": DAILY_LOSS_LIMIT,
-      "games": {"tennis": True, "penalty": True, "g21": True},
+      "games": {"tennis": True, "penalty": True, "g21": True, "g21k": True},
       "g21_channel": None,
+      "g21k_channel": None,
       "browser_mode": "opera",  # own | opera
       "pen_base_stake": PEN_BASE_STAKE,
       "pen_multiplier": PEN_MULTIPLIER,
@@ -683,7 +709,28 @@ def g21_ladder(market):
   return G21_LADDERS.get(market) or []
 
 
+def g21k_chain_lost(sig):
+  """Сколько уже проиграно в цепочке 21 Классики (прошлые шаги этого сигнала)."""
+  pref = f"g21k:{sig.get('sig_id')}:"
+  return sum(
+      b["stake"] for b in state["open_bets"] + state["closed_bets"]
+      if str(b.get("post_id", "")).startswith(pref)
+      and b.get("match_no") != sig.get("match_no") and b.get("result") != "win"
+  )
+
+
+def g21k_stake(sig):
+  """Ставка «на отбой»: (проиграно в цепочке + первая ставка × (КФ−1)) / (КФ−1)."""
+  base = float(G21K_BASE.get(sig.get("market"), 50))
+  k = float(sig.get("odds") or 0)
+  if k <= 1.01:
+    return base
+  return float(math.ceil((g21k_chain_lost(sig) + base * (k - 1)) / (k - 1)))
+
+
 def get_steps_for(game, market=None):
+  if game == "g21k":
+    return G21K_MAX_STEPS
   if game == "g21":
     if market:
       return len(g21_ladder(market))
@@ -717,8 +764,8 @@ def g21_ladder_text(market):
 
 def describe(b):
   """Короткое описание ставки/сигнала для сообщений."""
-  if game_of(b) == "g21":
-    return f"🃏 21 очко #{b.get('match_no', '?')} · {b['market']}"
+  if game_of(b) in CARD_GAMES:
+    return f"{CARD_GAMES[game_of(b)]['name']} #{b.get('match_no', '?')} · {b['market']}"
   if game_of(b) == "penalty":
     team = b.get("team") or ""
     return (
@@ -835,7 +882,7 @@ _cur_job = {"game": None}
 
 
 def yield_to_21():
-  if _cur_job["game"] != "g21" and jobs.urgent_waiting():
+  if _cur_job["game"] not in CARD_GAMES and jobs.urgent_waiting():
     raise Preempted()
 
 
@@ -1079,7 +1126,7 @@ def clear_coupon(page):
 
 def prepare_bet(page, sig, stake):
   _filled["stake"] = None
-  if game_of(sig) == "g21":
+  if game_of(sig) in CARD_GAMES:
     return prepare_21_bet(page, sig, stake)
   if game_of(sig) == "penalty":
     return prepare_pen_bet(page, sig, stake)
@@ -2025,12 +2072,15 @@ G21_FIND_JS = """([title, no]) => {
           x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 40)};
 }"""
 
-G21_MARKET_JS = """(title) => {
+G21_MARKET_JS = """([title, label]) => {
   const norm = s => (s || '').replace(/[«»“”„"]/g, '"').replace(/\\s+/g, ' ').trim().toLowerCase();
   const want = norm(title);
   const heads = Array.from(document.querySelectorAll('body *')).filter(el =>
       el.children.length <= 3 && norm(el.innerText) === want);
-  const yesRe = /^да\\s*(\\d+(?:[.,]\\d+)?)$/i;
+  // подпись кнопки + КФ: «Да 47», «Ничья 13.5», «4 4.8» (у цифры — обязательный пробел)
+  const esc = label.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+  const yesRe = new RegExp('^' + esc + (/\\d$/.test(label) ? '\\\\s+' : '\\\\s*')
+                           + '(\\\\d+(?:[.,]\\\\d+)?)$', 'i');
   const isYes = el => yesRe.test((el.innerText || '').replace(/\\s+/g, ' ').trim());
   for (const h of heads) {
     let box = h;
@@ -2057,12 +2107,13 @@ G21_MARKET_JS = """(title) => {
 }"""
 
 
-def g21_channel():
-  return state.get("g21_channel") or G21_CHANNEL or None
+def g21_channel(game="g21"):
+  return state.get(f"{game}_channel") or CARD_GAMES[game]["channel"] or None
 
 
-# Самые свежие номера игр из канала: по ним старые сигналы в очереди пропускаются сразу
-_g21_seen = {"bet": 0, "done": 0}
+# Самые свежие номера игр из канала (по каждой игре — своя нумерация): по ним старые
+# сигналы в очереди пропускаются сразу
+_g21_seen = {g: {"bet": 0, "done": 0} for g in CARD_GAMES}
 
 
 _skips = {"n": 0, "last_sent": 0.0}
@@ -2077,21 +2128,23 @@ def note_skip(text):
     send(f"⏭ Пропущено устаревших сигналов: {n} (последний: {html.escape(text)})")
 
 
-def g21_stale(no):
+def g21_stale(no, game="g21"):
   """Причина пропуска, если игра no уже прошла (пришли сигналы на следующие игры)."""
-  if _g21_seen["done"] >= no:
+  seen = _g21_seen[game]
+  if seen["done"] >= no:
     return f"игра #{no} уже сыграна — пропускаю, ставлю на следующую"
-  if _g21_seen["bet"] > no:
-    return f"пришёл сигнал на игру #{_g21_seen['bet']} — #{no} уже не успеть, пропускаю"
+  if seen["bet"] > no:
+    return f"пришёл сигнал на игру #{seen['bet']} — #{no} уже не успеть, пропускаю"
   return None
 
 
 _g21_urls = {}  # номер игры → адрес её страницы (Голд и Раздача на одну игру — без повторного поиска)
 
 
-def g21_open_game(page, no):
-  """Находит в поиске игру «21 Очко» №no и открывает её страницу."""
-  known = _g21_urls.get(no)
+def g21_open_game(page, no, game="g21"):
+  """Находит в поиске игру (21 Очко / 21 Классика) №no и открывает её страницу."""
+  title = CARD_GAMES[game]["title"]
+  known = _g21_urls.get((game, no))
   if known:
     if page.url != known:
       page.goto(known, wait_until="domcontentloaded", timeout=15000)
@@ -2115,10 +2168,10 @@ def g21_open_game(page, no):
     loaded_at = time.time()
     while time.time() < deadline:
       page.wait_for_timeout(1000)
-      stale = g21_stale(no)
+      stale = g21_stale(no, game)
       if stale:
         raise SkipSignal(stale)
-      res = page.evaluate(G21_FIND_JS, [G21_GAME_TITLE, no])
+      res = page.evaluate(G21_FIND_JS, [title, no])
       if res and res.get("found"):
         if res.get("href"):
           page.goto(urljoin(search_url, res["href"]), wait_until="domcontentloaded",
@@ -2131,9 +2184,9 @@ def g21_open_game(page, no):
           except Exception:
             raise RuntimeError(f"не открылась страница игры #{no}")
         page.wait_for_timeout(1500)
-        _g21_urls[no] = page.url
-        for old_no in [k for k in _g21_urls if k < no - 20]:
-          _g21_urls.pop(old_no, None)
+        _g21_urls[(game, no)] = page.url
+        for old in [k for k in _g21_urls if k[0] == game and k[1] < no - 20]:
+          _g21_urls.pop(old, None)
         return page.url
       numbers = (res or {}).get("numbers") or []
       if numbers:
@@ -2158,7 +2211,7 @@ def g21_open_game(page, no):
         except Exception:
           body = ""
         seen = "нет игр; на странице: " + re.sub(r"\s+", " ", body)[:200]
-      raise SkipSignal(f"игра «{G21_GAME_TITLE}» #{no} не найдена в поиске (видно: {seen})")
+      raise SkipSignal(f"игра «{title}» #{no} не найдена в поиске (видно: {seen})")
 
 
 def _g21_coupon_limit(page):
@@ -2177,16 +2230,17 @@ def _g21_coupon_limit(page):
 
 
 def prepare_21_bet(page, sig, stake):
-  out = next((v for v in G21_OUTCOMES.values() if v[0] == sig["market"]), None)
+  game = game_of(sig)
+  out = next((v for v in CARD_GAMES[game]["outcomes"].values() if v[0] == sig["market"]), None)
   if out is None:
-    raise SkipSignal(f"исход {sig['market']} для 21 очко не поддерживается")
-  _, block_title, coupon_word = out
+    raise SkipSignal(f"исход {sig['market']} не поддерживается")
+  _, block_title, coupon_word, btn_label = out
   no = sig["match_no"]
-  stale = g21_stale(no)
+  stale = g21_stale(no, game)
   if stale:
     raise SkipSignal(stale)
 
-  url = g21_open_game(page, no)
+  url = g21_open_game(page, no, game)
   with lock:
     sig["match_url"] = url
   clear_coupon(page)
@@ -2195,7 +2249,7 @@ def prepare_21_bet(page, sig, stake):
   searched = False
   deadline = time.time() + 20
   while time.time() < deadline:
-    btn = page.evaluate(G21_MARKET_JS, block_title)
+    btn = page.evaluate(G21_MARKET_JS, [block_title, btn_label])
     if btn:
       break
     if not searched:
@@ -2236,15 +2290,18 @@ def prepare_21_bet(page, sig, stake):
   if amount < 10:
     raise SkipSignal(f"сумма {money(amount)} меньше минимальной ставки сайта")
   if limit and amount < stake:
-    send(f"ℹ️ 21 очко #{no}: ставка {money(stake)} больше лимита сайта — ставлю {money(amount)}.")
+    send(f"ℹ️ {CARD_GAMES[game]['name']} #{no}: ставка {money(stake)} больше лимита сайта"
+         f" — ставлю {money(amount)}.")
   _filled["stake"] = float(amount)
   fill_stake(page, amount)
   return odds
 
 
-def parse_21_post(text):
-  """Сообщение из канала 21 очко (AUTO21 …) → событие, ('stop', sig) или None."""
-  m = re.search(r"AUTO21\s+(BET|RESULT|STOP)\b(.*)", text or "", re.I)
+def parse_21_post(text, game="g21"):
+  """Сообщение из канала карточной игры (AUTO21 … / AUTO21K …) → событие,
+  ('stop', sig) или None."""
+  prefix = CARD_GAMES[game]["prefix"]
+  m = re.search(rf"\b{prefix}\s+(BET|RESULT|STOP)\b(.*)", text or "", re.I)
   if not m:
     return None
   cmd = m.group(1).upper()
@@ -2264,14 +2321,14 @@ def parse_21_post(text):
       return None
     return {
         "kind": "result",
-        "game": "g21",
+        "game": game,
         "result": "win" if win == "1" else "lose",
-        "signal_id": f"g21:{sid}:{no}",
+        "signal_id": f"{game}:{sid}:{no}",
         "players": None,
         "set": None,
-        "event_id": f"g21:{sid}:{no}:res",
+        "event_id": f"{game}:{sid}:{no}:res",
     }
-  out = G21_OUTCOMES.get(kv.get("out", "").upper())
+  out = CARD_GAMES[game]["outcomes"].get(kv.get("out", "").upper())
   try:
     step = int(kv.get("step", ""))
     kf = float(kv["kf"].replace(",", ".")) if kv.get("kf") else None
@@ -2281,7 +2338,7 @@ def parse_21_post(text):
     return ("unsupported", kv.get("out", "?"))
   return {
       "kind": "signal",
-      "game": "g21",
+      "game": game,
       "players": "Игрок — Дилер",
       "market": out[0],
       "odds": kf,
@@ -2293,31 +2350,57 @@ def parse_21_post(text):
   }
 
 
-def _process_21_message(msg, is_edit=False):
-  ev = parse_21_post(msg.text or msg.caption or "")
+def drop_chain(game, sid):
+  """STOP: ещё не поставленные шаги цепочки убираем из очереди и inbox."""
+  pref = f"{game}:{sid}:"
+  removed = 0
+  with jobs.mutex:
+    for dq in (jobs.urgent, jobs.normal):
+      keep = [j for j in dq if not (j.get("fn") == job_bet
+                                    and str(j.get("id", "")).startswith(pref))]
+      removed += len(dq) - len(keep)
+      dq.clear()
+      dq.extend(keep)
+  with lock:
+    before = len(state["inbox"])
+    state["inbox"] = [x for x in state["inbox"]
+                      if not (x["kind"] == "signal" and x["id"].startswith(pref))]
+    if len(state["inbox"]) != before:
+      save_state()
+  return removed
+
+
+def _process_21_message(msg, is_edit=False, game="g21"):
+  name = CARD_GAMES[game]["name"]
+  ev = parse_21_post(msg.text or msg.caption or "", game)
   if ev is None:
     return
   if isinstance(ev, tuple):
     if ev[0] == "stop":
-      send(f"🃏 21 очко: цепочка {html.escape(ev[1])} остановлена сигналом STOP.")
+      n = drop_chain(game, ev[1])
+      print(f"{name}: цепочка {ev[1]} остановлена (STOP), убрано из очереди: {n}")
     else:
-      send(f"⚠️ 21 очко: исход {html.escape(ev[1])} пока не поддерживается — пропуск.")
+      send(f"⚠️ {name}: исход {html.escape(ev[1])} пока не поддерживается — пропуск.")
     return
   roll_day()
   m_no = re.search(r"game=(\d+)", msg.text or msg.caption or "")
   if m_no:
     key = "bet" if ev["kind"] == "signal" else "done"
-    _g21_seen[key] = max(_g21_seen[key], int(m_no.group(1)))
+    seen = _g21_seen[game]
+    no = int(m_no.group(1))
+    if seen[key] and no < seen[key] - 50:
+      _g21_seen[game] = seen = {"bet": 0, "done": 0}  # нумерация игр началась заново
+    seen[key] = max(seen[key], no)
   if ev["kind"] == "signal":
-    if not game_on("g21") or not state["running"]:
-      return  # 21 очко выключено — сигнал тихо пропускаем
-    event_id = f"g21:{ev['sig_id']}:{ev['match_no']}"
+    if not game_on(game) or not state["running"]:
+      return  # игра выключена — сигнал тихо пропускаем
+    event_id = f"{game}:{ev['sig_id']}:{ev['match_no']}"
   else:
     event_id = ev["event_id"]
   try:
     enqueue_event(event_id, ev, received_at=_msg_time(msg))
   except ValueError as e:
-    send(f"⚠️ 21 очко: событие отклонено: {html.escape(str(e))}")
+    send(f"⚠️ {name}: событие отклонено: {html.escape(str(e))}")
 
 
 class PlacementUnknown(RuntimeError):
@@ -3060,7 +3143,8 @@ def job_bet(page, job):
   sig = job["sig"]
   game = game_of(sig)
   _cur_job["game"] = game
-  stake = stake_for(sig["step"], game, sig.get("market"))
+  stake = (g21k_stake(sig) if game == "g21k"
+           else stake_for(sig["step"], game, sig.get("market")))
   title = html.escape(sig["players"] or "матч не распознан")
 
   def head(odds):
@@ -3116,14 +3200,15 @@ def job_bet(page, job):
     print(f"⏭ {describe(sig)}: игра выключена или бот на паузе — пропуск")
     return  # тихо: после выключения игры в очереди могут остаться десятки сигналов
 
-  max_age = {"g21": G21_SIGNAL_MAX_AGE, "penalty": PEN_SIGNAL_MAX_AGE}.get(game)
+  max_age = {"g21": G21_SIGNAL_MAX_AGE, "g21k": G21_SIGNAL_MAX_AGE,
+             "penalty": PEN_SIGNAL_MAX_AGE}.get(game)
   age = time.time() - float(job.get("received_at") or time.time())
   if max_age and age > max_age:
     note_skip(f"{describe(sig)}: сигнал устарел ({int(age // 60)} мин {int(age % 60)} с)")
     return  # без браузера: после перезапуска таких десятки
 
-  if game == "g21":
-    stale = g21_stale(sig.get("match_no") or 0)
+  if game in CARD_GAMES:
+    stale = g21_stale(sig.get("match_no") or 0, game)
     if stale:
       note_skip(f"{describe(sig)}: {stale}")
       return  # без браузера — очередь сразу идёт дальше
@@ -3287,7 +3372,7 @@ def job_bet(page, job):
           except Exception:
             pass
 
-      if attempt < MAX_RETRIES and game != "g21" and jobs.urgent_waiting():
+      if attempt < MAX_RETRIES and game not in CARD_GAMES and jobs.urgent_waiting():
         return not_placed(
             f"{last_error} · повторы прерваны: в очереди ставки 🃏 21 очко"
         )
@@ -3587,9 +3672,10 @@ def _process_channel_message(msg, is_edit=False):
   if msg.chat.id == PEN_CHANNEL:
     _process_pen_message(msg, is_edit)
     return
-  if g21_channel() and msg.chat.id == g21_channel():
-    _process_21_message(msg, is_edit)
-    return
+  for game in CARD_GAMES:
+    if g21_channel(game) and msg.chat.id == g21_channel(game):
+      _process_21_message(msg, is_edit, game)
+      return
   with lock:
     if msg.chat.id not in state["channels"]:
       if msg.chat.id not in announced_channels:
@@ -3602,6 +3688,10 @@ def _process_channel_message(msg, is_edit=False):
         kb.add(types.InlineKeyboardButton(
             "🃏 Это канал 21 очко",
             callback_data=f"set21_{msg.chat.id}",
+        ))
+        kb.add(types.InlineKeyboardButton(
+            "🂡 Это канал 21 Классика",
+            callback_data=f"set21k_{msg.chat.id}",
         ))
         title = html.escape(getattr(msg.chat, "title", "") or "")
         send(
@@ -3873,6 +3963,11 @@ def status_text():
       + html.escape(g21_ladder_text("ГОЛД"))
       + "\n  Раздача: "
       + html.escape(g21_ladder_text("РАЗДАЧА"))
+      + "\n"
+      + "🂡 21 Классика (канал "
+      + str(g21_channel("g21k") or "не задан")
+      + "): ставки «на отбой», первые: "
+      + html.escape(", ".join(f"{m.lower()} {v}" for m, v in G21K_BASE.items()))
       + "\n"
       + "Игры: "
       + ", ".join(
@@ -4332,6 +4427,19 @@ def on_cb(c):
     pass
 
   d = c.data
+  if d.startswith("set21k_"):
+    try:
+      ch = int(d[7:])
+    except ValueError:
+      return
+    with lock:
+      state["g21k_channel"] = ch
+      if ch in state["channels"]:
+        state["channels"].remove(ch)
+        state["channel_id"] = state["channels"][0] if state["channels"] else None
+      save_state()
+    send(f"🂡 Канал 21 Классика: <code>{ch}</code>. Сигналы AUTO21K из него идут в автоставку.")
+    return
   if d.startswith("set21_"):
     try:
       ch = int(d[6:])

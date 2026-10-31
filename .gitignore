@@ -9,3 +9,5 @@ vlad/vlad21_settings*.json
 dbbet/browser_profile/
 dbbet/autobet_bot.pid
 tt/*.json
+alex/alex21*.json
+alex/*.lock
