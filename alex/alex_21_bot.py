@@ -1262,8 +1262,19 @@ def grox_auto_dog():
     return bool(cfg.get("grox_auto_dog", True))
 
 
+# Суммы автоставки 21 Классики (как G21K_LADDERS в autobet_bot.py): Алекс считает
+# посты и «Всего» по тем же ставкам, что реально ставит бот, а не по своим.
+AUTO21K_LADDERS = {
+    "g": [20, 30, 50, 80, 120, 170, 260, 390, 590, 880],
+    "c4": [260, 390, 590, 890, 1330, 2000, 2990, 4490, 6730, 10100],
+    "x": [440, 670, 1000, 1500, 2250, 3380, 5070, 7600, 11400, 17100],
+}
+
+
 def grox_stakes(key):
     n = grox_steps(key)
+    if AUTO21K_CHANNEL and key in AUTO21K_LADDERS:
+        return AUTO21K_LADDERS[key][:n]
     base = _grox_base_stakes(n, key)
     if key in ("g", "b") or not grox_auto_dog():
         return base
