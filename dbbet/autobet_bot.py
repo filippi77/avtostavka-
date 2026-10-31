@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "31.10 12:20"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 12:40"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -224,7 +224,7 @@ G21_SIGNAL_MAX_AGE = 10 * 60
 PEN_SIGNAL_MAX_AGE = 4 * 60
 
 # ----- 🂡 21 Классика (сигналы AUTO21K от бота «Алекс») -----
-G21K_CHANNEL = int(os.environ.get("AUTOBET_G21K_CHANNEL", "0") or 0)
+G21K_CHANNEL = int(os.environ.get("AUTOBET_G21K_CHANNEL", "-1003964603024") or 0)  # «21 классикавто»
 G21K_GAME_TITLE = "21 Классика"
 G21K_OUTCOMES = {
     "G": ("ГОЛД", 'Будет "золотое очко"', "золотое очко", "Да"),
