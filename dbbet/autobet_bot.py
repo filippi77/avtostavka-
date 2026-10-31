@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "31.10 16:00"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 23:00"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2126,8 +2126,9 @@ def g21_stale(no, game="g21"):
 _g21_urls = {}  # номер игры → адрес её страницы (Голд и Раздача на одну игру — без повторного поиска)
 
 
-def g21_open_game(page, no, game="g21"):
-  """Находит в поиске игру (21 Очко / 21 Классика) №no и открывает её страницу."""
+def g21_open_game(page, no, game="g21", prefetch=False):
+  """Находит в поиске игру (21 Очко / 21 Классика) №no и открывает её страницу.
+  prefetch — заранее, пока ждём сигнал: бросаем, как только пришло задание."""
   title = CARD_GAMES[game]["title"]
   known = _g21_urls.get((game, no))
   if known:
@@ -2153,6 +2154,8 @@ def g21_open_game(page, no, game="g21"):
     loaded_at = time.time()
     while time.time() < deadline:
       page.wait_for_timeout(1000)
+      if prefetch and not jobs.empty():
+        raise SkipSignal("предзагрузка прервана: пришло задание")
       stale = g21_stale(no, game)
       if stale:
         raise SkipSignal(stale)
@@ -3044,6 +3047,24 @@ def _job_title(job):
 _launch_warned = {"done": False}
 
 
+def prefetch_next_game(page, job):
+  """После ставки 21 очко / 21 Классики заранее находим в поиске следующую игру:
+  если по ней придёт ставка догона, бот сразу откроет её страницу, без поиска.
+  В 21 Классике следующая игра начинается почти сразу после итога — иначе не успеть."""
+  sig = job.get("sig") or {}
+  game = game_of(sig)
+  if job.get("fn") != job_bet or game not in CARD_GAMES or not page or not jobs.empty():
+    return
+  no = int(sig.get("match_no") or 0) + 1
+  if not no or (game, no) in _g21_urls:
+    return
+  try:
+    g21_open_game(page, no, game, prefetch=True)
+    print(f"Предзагружена {CARD_GAMES[game]['name']} #{no}")
+  except Exception as e:
+    print(f"Предзагрузка #{no}: {str(e)[:100]}")
+
+
 def browser_worker():
   p = None
   browser = None
@@ -3084,6 +3105,7 @@ def browser_worker():
       page = fresh_page(browser)
       ensure_login(page)
       execute_job(job, page)
+      prefetch_next_game(page, job)
     except Exception as e:
       # Переподключаемся только если связь с Opera действительно потеряна:
       # иначе на каждую ошибку открывалась бы новая вкладка, а старая оставалась.

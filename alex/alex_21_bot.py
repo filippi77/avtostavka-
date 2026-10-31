@@ -1569,12 +1569,25 @@ def a21k_flush():
 _A21K_CARD_RE = re.compile(r"(10|[2-9JQKA])\s*[♠♣♥❤♦]")
 
 
-def a21k_lost_early(key, cards):
-    """По картам идущей игры линия уже точно не заходит (пока — только Голд:
-    у обоих видны первые две карты, и ни у кого не два туза)."""
-    if key == "g":
-        return (len(cards) == 2 and all(len(c) >= 2 for c in cards)
-                and not any(c[0] == "A" and c[1] == "A" for c in cards))
+def a21k_lost_early(key, cards, pts):
+    """По ходу игры линия уже точно не заходит — ставку на следующую игру можно
+    отправить сразу, не дожидаясь итога (в 21 Классике следующая игра начинается
+    почти сразу, по итогу бот не успевает).
+    cards — [карты Игрока, карты Дилера], pts — [очки Игрока, очки Дилера]."""
+    if len(cards) < 2:
+        return False
+    pl, dl = cards[0], cards[1]
+    p_pts = pts[0] if len(pts) > 0 else 0
+    d_pts = pts[1] if len(pts) > 1 else 0
+    if key == "g":    # у обоих видны первые две карты, и ни у кого не два туза
+        return (len(pl) >= 2 and len(dl) >= 2
+                and not any(c[0] == "A" and c[1] == "A" for c in (pl, dl)))
+    if key == "c4":   # у Игрока уже 5+ карт, или Игрок закончил (перебор / добирает
+        #             Дилер) не на 4 картах
+        player_done = p_pts > 21 or len(dl) >= 3
+        return len(pl) >= 5 or (player_done and len(pl) != 4)
+    if key == "x":    # перебор у одного из них — ничьей уже не будет
+        return p_pts > 21 or d_pts > 21
     return False
 
 
@@ -1589,6 +1602,7 @@ def a21k_early(chat_id, text):
     if not g:
         return
     cards = [_A21K_CARD_RE.findall(h) for h in re.findall(r"\(([^)]*)\)", text or "")[:2]]
+    pts = [int(x) for x in re.findall(r"(\d+)\s*\(", text or "")[:2]]
     with column_lock:
         st = grox_state(chat_id)
         for r in st["rows"]:
@@ -1597,7 +1611,7 @@ def a21k_early(chat_id, text):
             n = g - r["start"] + 1
             if n < 1 or n > len(r["stakes"]) or (r["sid"], g) in _a21k_early:
                 continue
-            if not a21k_lost_early(r["key"], cards):
+            if not a21k_lost_early(r["key"], cards, pts):
                 continue
             _a21k_early.add((r["sid"], g))
             a21k_add(a21k_line("RESULT", r, g, win=0))
