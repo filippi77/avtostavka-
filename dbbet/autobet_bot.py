@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "31.10 13:20"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 13:40"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -231,9 +231,13 @@ G21K_OUTCOMES = {
     "X": ("НИЧЬЯ", "1X2", "ничья", "Ничья"),
     "P4": ("4КАРТЫ", "Игрок, точное количество карт", "количество карт", "4"),
 }  # 21 очко и Перебор в 21 Классике не ставим
-# Ставка 21 Классики — «на отбой»: каждая ставка цепочки возвращает всё
-# проигранное в ней и приносит первую ставку × (КФ − 1). Здесь — первая ставка.
-G21K_BASE = {"ГОЛД": 25, "НИЧЬЯ": 50, "4КАРТЫ": 50}
+# Лесенки 21 Классики: догон ×1.5 на 10 шагов, последний шаг — максимум сайта
+# (если лимит в купоне меньше — ставится лимит). КФ берётся живой, с кнопки.
+G21K_LADDERS = {
+    "ГОЛД": [20, 30, 50, 80, 120, 170, 260, 390, 590, 880],
+    "4КАРТЫ": [260, 390, 590, 890, 1330, 2000, 2990, 4490, 6730, 10100],
+    "НИЧЬЯ": [440, 670, 1000, 1500, 2250, 3380, 5070, 7600, 11400, 17100],
+}
 G21K_MAX_STEPS = 10
 G21K_MAX_ODDS_DIFF = 0.7  # КФ «плавает» от игры к игре: не ставим только при совсем другом КФ
 
@@ -704,32 +708,13 @@ def game_on(game):
   return bool(state.get("games", {}).get(game, True))
 
 
-def g21_ladder(market):
-  return G21_LADDERS.get(market) or []
-
-
-def g21k_chain_lost(sig):
-  """Сколько уже проиграно в цепочке 21 Классики (прошлые шаги этого сигнала)."""
-  pref = f"g21k:{sig.get('sig_id')}:"
-  return sum(
-      b["stake"] for b in state["open_bets"] + state["closed_bets"]
-      if str(b.get("post_id", "")).startswith(pref)
-      and b.get("match_no") != sig.get("match_no") and b.get("result") != "win"
-  )
-
-
-def g21k_stake(sig):
-  """Ставка «на отбой»: (проиграно в цепочке + первая ставка × (КФ−1)) / (КФ−1)."""
-  base = float(G21K_BASE.get(sig.get("market"), 50))
-  k = float(sig.get("odds") or 0)
-  if k <= 1.01:
-    return base
-  return float(math.ceil((g21k_chain_lost(sig) + base * (k - 1)) / (k - 1)))
+def g21_ladder(market, game="g21"):
+  return (G21K_LADDERS if game == "g21k" else G21_LADDERS).get(market) or []
 
 
 def get_steps_for(game, market=None):
   if game == "g21k":
-    return G21K_MAX_STEPS
+    return len(g21_ladder(market, "g21k")) if market else G21K_MAX_STEPS
   if game == "g21":
     if market:
       return len(g21_ladder(market))
@@ -740,8 +725,8 @@ def get_steps_for(game, market=None):
 
 
 def stake_for(step, game="tennis", market=None):
-  if game == "g21":
-    ladder = g21_ladder(market)
+  if game in CARD_GAMES:
+    ladder = g21_ladder(market, game)
     return float(ladder[step - 1]) if 1 <= step <= len(ladder) else 0.0
   if game == "penalty":
     base = float(state.get("pen_base_stake", PEN_BASE_STAKE))
@@ -757,8 +742,8 @@ def pen_ladder_text():
   )
 
 
-def g21_ladder_text(market):
-  return " ".join(str(x) for x in g21_ladder(market))
+def g21_ladder_text(market, game="g21"):
+  return " ".join(str(x) for x in g21_ladder(market, game))
 
 
 def describe(b):
@@ -2271,11 +2256,10 @@ def prepare_21_bet(page, sig, stake):
     raise SkipSignal(f"КФ {odds} ниже минимума {get_min_odds()}")
   want = sig.get("odds")
   if game == "g21k":
-    # в 21 Классике КФ меняется от игры к игре, а «Алекс» шлёт средний — сверяем
-    # только грубые ошибки, а ставку «на отбой» считаем по КФ, который сейчас на сайте
+    # в 21 Классике КФ меняется от игры к игре, а «Алекс» шлёт средний — ставим
+    # по живому КФ с кнопки, пропускаем только при совсем другом КФ (не тот рынок)
     if want and abs(odds - want) / want > G21K_MAX_ODDS_DIFF:
       raise SkipSignal(f"КФ на сайте {odds}, в сигнале {want} — похоже, не тот рынок")
-    stake = g21k_stake(dict(sig, odds=odds))
   elif want and abs(odds - want) / want > G21_MAX_ODDS_DIFF:
     raise SkipSignal(f"КФ на сайте {odds}, в сигнале {want} — слишком большая разница")
 
@@ -2429,7 +2413,7 @@ def check_signal(job, stake):
   game = game_of(sig)
   if not game_on(game):
     raise RuntimeError(f"{GAMES.get(game, game)} выключен в пульте")
-  max_steps = get_steps_for(game, sig.get("market") if game == "g21" else None)
+  max_steps = get_steps_for(game, sig.get("market") if game in CARD_GAMES else None)
   if not 1 <= sig["step"] <= max_steps or not 1 <= sig["set"] <= 7:
     raise RuntimeError(
         f"шаг {sig['step']} больше лимита ({max_steps})"
@@ -3139,7 +3123,7 @@ def job_test(page, job):
 
 def warn_last_step(sig):
   game = game_of(sig)
-  steps = get_steps_for(game, sig.get("market") if game == "g21" else None)
+  steps = get_steps_for(game, sig.get("market") if game in CARD_GAMES else None)
   if sig["step"] >= steps:
     send(
         f"⚠️ Это последний шаг догона ({sig['step']}/{steps})!\n"
@@ -3151,8 +3135,7 @@ def job_bet(page, job):
   sig = job["sig"]
   game = game_of(sig)
   _cur_job["game"] = game
-  stake = (g21k_stake(sig) if game == "g21k"
-           else stake_for(sig["step"], game, sig.get("market")))
+  stake = stake_for(sig["step"], game, sig.get("market"))
   title = html.escape(sig["players"] or "матч не распознан")
 
   def head(odds):
@@ -3166,7 +3149,7 @@ def job_bet(page, job):
         + "\nШаг догона: "
         + str(sig["step"])
         + " из "
-        + str(get_steps_for(game, sig.get("market") if game == "g21" else None))
+        + str(get_steps_for(game, sig.get("market") if game in CARD_GAMES else None))
         + "\nСумма: "
         + money(stake)
     )
@@ -3974,9 +3957,9 @@ def status_text():
       + "\n"
       + "🂡 21 Классика (канал "
       + str(g21_channel("g21k") or "не задан")
-      + "): ставки «на отбой», первые: "
-      + html.escape(", ".join(f"{m.lower()} {v}" for m, v in G21K_BASE.items()))
-      + "\n"
+      + "):\n"
+      + "".join(f"  {m.capitalize()}: {html.escape(g21_ladder_text(m, 'g21k'))}\n"
+                for m in G21K_LADDERS)
       + "Игры: "
       + ", ".join(
           f"{name} {'✅' if game_on(g) else '⛔️'}" for g, name in GAMES.items()
