@@ -1221,9 +1221,10 @@ GROX_LINES = [       # (ключ, значок, ставки, КФ по умол
     ("c4", "🃏4", [100, 200, 300, 400, 500], 7.0),   # 4 карты
     ("b", "💥", [100, 210, 430, 880, 1790], 2.3),    # перебор (у кого угодно)
     ("pb", "🙋", [100, 200, 300, 400, 500], 4.5),     # перебор у Игрока
+    ("p21", "🎯И", [100, 200, 300, 400, 500], 9.0),   # Игрок получит 21 очко
 ]
 GROX_NAMES = {"x": "Ничья", "o": "21 очко", "g": "Голд (2 туза)", "c4": "4 карты Игроку", "b": "Перебор",
-              "pb": "Перебор игрока"}
+              "pb": "Перебор игрока", "p21": "Игрок получит 21"}
 GROX_STEP = {1: "", 2: "1️⃣", 3: "2️⃣", 4: "3️⃣", 5: "4️⃣", 6: "5️⃣", 7: "6️⃣",
              8: "7️⃣", 9: "8️⃣", 10: "9️⃣"}
 GROX_STEPS_CHOICES = (3, 5, 7, 10)
@@ -1238,7 +1239,7 @@ def grox_odds(key):
 
 
 def grox_steps(key):
-    return int(cfg.setdefault("grox_steps", {}).get(key, 10 if key in ("b", "pb") else 5))
+    return int(cfg.setdefault("grox_steps", {}).get(key, 10 if key in ("b", "pb", "p21") else 5))
 
 
 def _grox_base_stakes(n, key="g"):
@@ -1271,6 +1272,7 @@ AUTO21K_LADDERS = {
     "c4": [260, 390, 590, 890, 1330, 2000, 2990, 4490, 6730, 10100],
     "x": [140, 190, 280, 410, 600, 880, 1300, 1940, 2890, 4310],  # уравнена с 4 картами
     "pb": [450, 720, 1160, 1840, 2860, 4450, 6850, 10520, 16080, 24530],  # уравнена с 4 картами
+    "p21": [200, 280, 420, 620, 920, 1370, 2040, 3040, 4540, 6800],  # уравнена с 4 картами
 }
 
 
@@ -1332,6 +1334,8 @@ def grox_hit(key, text):
         return any(v > 21 for v in pts)
     if key == "pb":   # перебор у Игрока (первые очки в посте)
         return bool(pts) and pts[0] > 21
+    if key == "p21":  # у Игрока ровно 21 очко
+        return bool(pts) and pts[0] == 21
     if key == "c4":
         parts = re.findall(r"\(([^)]*)\)", t)[:1]
         return bool(parts) and sum(1 for ch in parts[0] if ch in "♠♣♥❤♦") == 4
@@ -1341,7 +1345,7 @@ def grox_hit(key, text):
     return _tag("O") or _tag("G") or 21 in pts
 
 
-GROX_WHAT = [("o", "21"), ("g", "G"), ("x", "X"), ("c4", "4к"), ("b", "💥"), ("pb", "🙋")]
+GROX_WHAT = [("o", "21"), ("g", "G"), ("x", "X"), ("c4", "4к"), ("b", "💥"), ("pb", "🙋"), ("p21", "И21")]
 
 
 def grox_what(text):
@@ -1359,7 +1363,8 @@ def grox_what(text):
 
 
 GROX_LABEL = {"x": "🤝 Ничья", "o": "🎯 21 очко", "g": "🥇 Голд", "c4": "🃏 4 карты",
-              "b": "💥 Перебор", "pb": "🙋 Перебор игрока"}
+              "b": "💥 Перебор", "pb": "🙋 Перебор игрока",
+              "p21": "🎯 Игрок 21"}
 
 
 def grox_text(chat_id, start):
@@ -1477,7 +1482,7 @@ def grox_cleanup(chat_id):
 AUTO21K_CHANNEL = -1003964603024  # «21 классикавто»
 # какие линии дублировать в автоставку: ключ линии → код исхода
 # Голд, Ничья, 4 карты, Перебор игрока (21 очко и общий Перебор — нет)
-AUTO21K_OUT = {"g": "G", "x": "X", "c4": "P4", "pb": "PB"}
+AUTO21K_OUT = {"g": "G", "x": "X", "c4": "P4", "pb": "PB", "p21": "P21"}
 # сигналы шлём только из чата 21 Классики (Алекс может сидеть и в чате 21 очко)
 AUTO21K_CHAT_WORDS = ("klass", "класс", "classic")
 _a21k_queue = []
@@ -1604,6 +1609,9 @@ def a21k_lost_early(key, cards, pts, dealer0=None):
     if key == "pb":   # Игрок закончил (Дилер начал брать карты) без перебора
         dealer_draws = len(dl) >= 3 or (dealer0 is not None and len(dl) > dealer0)
         return dealer_draws and 0 < p_pts <= 21
+    if key == "p21":  # у Игрока перебор, или он закончил не на 21
+        dealer_draws = len(dl) >= 3 or (dealer0 is not None and len(dl) > dealer0)
+        return p_pts > 21 or (dealer_draws and 0 < p_pts < 21)
     return False
 
 
@@ -1632,8 +1640,9 @@ def a21k_early(chat_id, text):
             n = g - r["start"] + 1
             if n < 1 or n > len(r["stakes"]) or (r["sid"], g) in _a21k_early:
                 continue
-            if r["key"] == "pb" and pts and pts[0] > 21:
-                # перебор у Игрока виден сразу — заход, следующей ставки нет
+            if pts and ((r["key"] == "pb" and pts[0] > 21)
+                        or (r["key"] == "p21" and pts[0] == 21)):
+                # перебор / 21 у Игрока видны сразу — заход, следующей ставки нет
                 _a21k_early.add((r["sid"], g))
                 _a21k_early_win.add((r["sid"], g))
                 a21k_add(a21k_line("RESULT", r, g, win=1))
