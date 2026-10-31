@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "31.10 13:00"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 13:20"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2288,6 +2288,9 @@ def prepare_21_bet(page, sig, stake):
     raise RuntimeError(f"в купоне {cards.count()} событий вместо одного")
   card_text = cards.first.inner_text()
   if coupon_word.lower() not in card_text.lower():
+    raise RuntimeError(f"в купон попал не тот исход: {card_text}")
+  # «Игрок, точное количество карт: 4» — проверяем именно 4, а не 2/3/5
+  if btn_label.isdigit() and not re.search(rf":\s*{btn_label}\b", card_text):
     raise RuntimeError(f"в купон попал не тот исход: {card_text}")
 
   limit = _g21_coupon_limit(page)
