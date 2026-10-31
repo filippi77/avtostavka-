@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "01.11 01:00"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "01.11 01:15"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -231,9 +231,7 @@ G21K_OUTCOMES = {
     "X": ("НИЧЬЯ", "1X2", "ничья", "Ничья"),
     "P4": ("4КАРТЫ", "Игрок, точное количество карт", "количество карт", "4"),
     "PB": ("ПЕРЕБОР ИГРОКА", "Будет перебор у игрока", "перебор у игрока", "Да"),
-    # название блока — по аналогии с «Игрок получит "золотое очко"»; если на сайте
-    # иначе, бот напишет «нет рынка …» и ставку пропустит
-    "P21": ("ИГРОК 21", "Игрок получит 21 очко", "21 очко", "Да"),
+    "P21": ("ИГРОК 21", "Игрок наберёт 21 очко", "игрок наберёт 21", "Да"),
 }  # 21 очко и Перебор в 21 Классике не ставим
 # Лесенки 21 Классики: догон ×1.5 на 10 шагов, последний шаг — максимум сайта
 # (если лимит в купоне меньше — ставится лимит). КФ берётся живой, с кнопки.
@@ -2068,7 +2066,8 @@ G21_FIND_JS = """([title, no]) => {
 }"""
 
 G21_MARKET_JS = """([title, label]) => {
-  const norm = s => (s || '').replace(/[«»“”„"]/g, '"').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const norm = s => (s || '').replace(/[«»“”„"]/g, '"').replace(/\\s+/g, ' ').trim().toLowerCase()
+                             .replace(/ё/g, 'е');
   const want = norm(title);
   const heads = Array.from(document.querySelectorAll('body *')).filter(el =>
       el.children.length <= 3 && norm(el.innerText) === want);
@@ -2285,7 +2284,7 @@ def prepare_21_bet(page, sig, stake):
   if cards.count() != 1:
     raise RuntimeError(f"в купоне {cards.count()} событий вместо одного")
   card_text = cards.first.inner_text()
-  if coupon_word.lower() not in card_text.lower():
+  if coupon_word.lower().replace("ё", "е") not in card_text.lower().replace("ё", "е"):
     raise RuntimeError(f"в купон попал не тот исход: {card_text}")
   # «Игрок, точное количество карт: 4» — проверяем именно 4, а не 2/3/5
   if btn_label.isdigit() and not re.search(rf":\s*{btn_label}\b", card_text):
