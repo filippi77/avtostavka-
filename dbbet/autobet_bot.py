@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "31.10 13:40"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 14:00"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -3858,6 +3858,7 @@ def panel():
       types.InlineKeyboardButton("Банк / сегодня", callback_data="bank"),
       types.InlineKeyboardButton("Открытые ставки", callback_data="open_bets"),
   )
+  kb.add(types.InlineKeyboardButton("🪜 Лесенки догона", callback_data="ladders"))
   kb.add(
       types.InlineKeyboardButton(
           f"Ставка: {money(get_base_stake())} ₽", callback_data="set_stake"
@@ -4054,6 +4055,27 @@ def cmd_limit(msg):
     state["daily_loss_limit"] = val
     save_state()
   send(f"Дневной стоп-лосс: {limit_text()}")
+
+
+def ladders_text():
+  """Таблица лесенок 21 очко и 21 Классики: шаг → ставка, сколько проиграно до него."""
+  out = ["🪜 <b>Лесенки догона</b> (если лимит в купоне меньше — ставится лимит)"]
+  for game, ladders in (("g21", G21_LADDERS), ("g21k", G21K_LADDERS)):
+    for market, ladder in ladders.items():
+      out.append(f"\n<b>{CARD_GAMES[game]['name']} · {market.capitalize()}</b>")
+      lost = 0
+      for i, v in enumerate(ladder, 1):
+        out.append(f"<code>{i:>2}. {v:>6}</code>  (до него проиграно {lost})")
+        lost += v
+      out.append(f"Если все {len(ladder)} мимо: <b>−{lost}</b>")
+  return "\n".join(out)
+
+
+@bot.message_handler(commands=["ladder", "ladders"])
+def cmd_ladder(msg):
+  if msg.from_user.id != ADMIN_ID:
+    return
+  send(ladders_text())
 
 
 @bot.message_handler(commands=["browser"])
@@ -4555,6 +4577,9 @@ def on_cb(c):
       state["channels"] = []
       state["generation"] += 1
     send("Список теннисных каналов очищен. ⚽ Пенальти Авто остаётся подключён.")
+  elif d == "ladders":
+    send(ladders_text())
+    return
   elif d == "bank":
     if not state["dry"]:
       jobs.put({"fn": job_balance, "notify": True})
