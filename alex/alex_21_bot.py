@@ -1495,9 +1495,36 @@ def a21k_line(cmd, r, game, **kw):
     return (f"AUTO21K {cmd} sig={r['sid']} game={game} out={AUTO21K_OUT[r['key']]} {extra}").strip()
 
 
+# sid → (номер игры, ключ линии): ставка, отправленная в автоставку и ещё без итога.
+# Если линию остановили (стоп при заходе другой линии), бот автоставки уже мог
+# поставить на следующую игру — итог этой игры всё равно надо прислать, иначе
+# ставка висит в «Открытых».
+_a21k_pending = {}
+_A21K_KEY_BY_OUT = {v: k for k, v in AUTO21K_OUT.items()}
+
+
 def a21k_add(line):
+    m = re.match(r"AUTO21K (BET|RESULT) sig=(\S+) game=(\d+) out=(\S+)", line)
+    if m:
+        cmd, sid, game, out = m.group(1), m.group(2), int(m.group(3)), m.group(4)
+        if cmd == "BET":
+            _a21k_pending[sid] = (game, _A21K_KEY_BY_OUT.get(out))
+        elif _a21k_pending.get(sid, (None,))[0] == game:
+            _a21k_pending.pop(sid, None)
     with _a21k_lock:
         _a21k_queue.append(line)
+
+
+def a21k_settle_pending(chat_id, g, text, st):
+    """Итог игры g для ставок автоставки, чьи линии уже остановлены/закрыты."""
+    if not a21k_chat_ok(chat_id):
+        return
+    live = {r.get("sid") for r in st["rows"] if r.get("status") == "⏳"}
+    for sid, (game, key) in list(_a21k_pending.items()):
+        if game != g or sid in live or not key:
+            continue
+        a21k_add(f"AUTO21K RESULT sig={sid} game={g} out={AUTO21K_OUT[key]}"
+                 f" win={1 if grox_hit(key, text) else 0}")
 
 
 def a21k_flush():
@@ -1628,6 +1655,10 @@ def process_grox(chat_id, text):
         grox_last[chat_id] = g
     st = grox_state(chat_id)
     changed = {}
+    try:
+        a21k_settle_pending(chat_id, g, text, st)
+    except Exception as e:
+        print("AUTO21K итог остановленной ставки:", e)
     # тени «без стопа»
     if st.get("virt_cont"):
         still = []
@@ -1714,6 +1745,14 @@ def process_grox(chat_id, text):
             r["result"] = -float(spent)
             r["stop_hit"] = True
             if a21k_on(chat_id, r):
+                # ставку этой линии на следующую игру ещё не отправили — и не шлём
+                with _a21k_lock:
+                    before = len(_a21k_queue)
+                    _a21k_queue[:] = [x for x in _a21k_queue
+                                      if not x.startswith(f"AUTO21K BET sig={r['sid']} ")]
+                    dropped = before != len(_a21k_queue)
+                if dropped and _a21k_pending.get(r["sid"], (0,))[0] > g:
+                    _a21k_pending.pop(r["sid"], None)
                 a21k_add(f"AUTO21K STOP sig={r['sid']}")
             st["bank"] = round(st["bank"] + r["result"], 2)
             grox_add_src_result(st, r)

@@ -78,7 +78,7 @@ def _take_single_lock():
 _take_single_lock()
 
 # ================== НАСТРОЙКИ ==================
-BOT_VERSION = "31.10 14:20"  # показывается при запуске и в статусе — видно, какая версия работает
+BOT_VERSION = "31.10 14:40"  # показывается при запуске и в статусе — видно, какая версия работает
 # Секреты лежат в autobet.env рядом со скриптом (в git не попадает),
 # формат — строки КЛЮЧ=значение, образец — autobet.env.example.
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -3791,6 +3791,31 @@ def job_health(page, job):
     mark_site(f"ошибка проверки: {e}")
 
 
+CARD_BET_STALE = 20 * 60  # ставка 21 очко / 21 Классики без итога дольше этого — висящая
+
+
+def sweep_card_bets():
+  """Игры 21 идут раз в минуту: если итог не пришёл за 20 минут, он уже не придёт
+  (цепочку остановили, бот-сигнальщик перезапускался). Убираем такие ставки из
+  «Открытых», чтобы не висели и не держали дневной лимит; банк не меняем."""
+  now = time.time()
+  with lock:
+    stale = [b for b in state["open_bets"]
+             if game_of(b) in CARD_GAMES and now - float(b.get("time") or now) > CARD_BET_STALE]
+    if not stale:
+      return
+    for b in stale:
+      state["open_bets"].remove(b)
+      b["status"] = "cancelled"
+      b["result"] = "cancelled"
+      state["closed_bets"].append(b)
+    save_state()
+  send(f"🧹 Убрано из «Открытых» ставок без итога: {len(stale)} ("
+       + ", ".join(html.escape(describe(b)) + f" {money(b['stake'])}" for b in stale[:6])
+       + ("…" if len(stale) > 6 else "")
+       + "). Итог не пришёл из канала — проверь их в истории ставок на сайте.")
+
+
 def health_loop():
   time.sleep(60)
   while True:
@@ -3798,6 +3823,7 @@ def health_loop():
       # не мешаем ставкам: проверяем только при пустой очереди
       if jobs.empty():
         jobs.put({"fn": job_health})
+      sweep_card_bets()
     except Exception:
       traceback.print_exc()
     time.sleep(HEALTH_EVERY)
