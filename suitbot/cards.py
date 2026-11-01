@@ -40,15 +40,41 @@ def frequency_label(every: int) -> str:
     return {0: "выключены", 1: "каждая игра"}.get(every, f"раз в {every} игр")
 
 
+SIDE_ICONS = {"P": "🎯", "B": "🏦", "T": "⚖️"}
+
+
+def bar(n: int, cells: int = 8, full: int = 20) -> str:
+    """Полоска заполненности: сколько ставок по сравнению с «полным» залом."""
+    filled = min(cells, round(cells * min(n, full) / full))
+    return "▓" * filled + "░" * (cells - filled)
+
+
+def shares(counts: dict[str, int]) -> str:
+    """Доля ставок по мастям в процентах: ♠ 30% ♣ 20% …"""
+    total = sum(counts.get(s, 0) for s in SUITS)
+    if not total:
+        return ""
+    return " ".join(f"{s} {round(100 * counts.get(s, 0) / total)}%" for s in SUITS)
+
+
+def status_line(game: int, closed: bool) -> str:
+    icon, text = ("🔴", t("card_closed")) if closed else ("🟢", t("card_open"))
+    return f"<b>#N{game}</b> · {icon} {text}"
+
+
 def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
-    return f"🎴 <b>#N{game}</b> · {t('card_closed') if closed else t('card_open')} · {sum(counts.values())}"
+    total = sum(counts.values())
+    lines = [f"🎴 {status_line(game, closed)}", f"{bar(total)} {t('card_total', n=total)}"]
+    if not closed and total:
+        lines.append(shares(counts))
+    return "\n".join(lines)
 
 
 def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
-        [InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
-         for code in betting.SIDES],
+        [InlineKeyboardButton(text=f"{SIDE_ICONS[code]} {betting.side_name(code).capitalize()}",
+                              callback_data=f"b:{game}:side:{code}") for code in betting.SIDES],
         *[[InlineKeyboardButton(text=f"💰 {x}", callback_data=f"st:{x}") for x in row] for row in STAKE_ROWS],
     ]
     if tournament_on:
@@ -65,34 +91,39 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duel
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def picker_keyboard(game: int, info: dict | None, tournament_on: bool) -> InlineKeyboardMarkup:
-    """Выбор ставки в личке: масти или исход, сумма, кошелёк. Видит только игрок."""
+def picker_keyboard(game: int, info: dict | None, tournament_on: bool, stake: int | None = None,
+                    wallet: str | None = None) -> InlineKeyboardMarkup:
+    """Выбор ставки в личке: масть или исход, сумма, кошелёк. Текущие сумма и кошелёк отмечены ✓."""
     if info is None:
-        bets = [[InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
-                [InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
-                 for code in betting.SIDES]]
+        bets = [[InlineKeyboardButton(text=suit_label(x), callback_data=f"b:{game}:suit:{x}") for x in SUITS],
+                [InlineKeyboardButton(text=f"{SIDE_ICONS[c]} {betting.side_name(c).capitalize()}",
+                                      callback_data=f"b:{game}:side:{c}") for c in betting.SIDES]]
     else:
         odds = info["odds"]
         bets = []
         if "1" in odds and "2" in odds:
-            bets.append([InlineKeyboardButton(text=f"{betting.describe_pick('win', s, info)} ×{odds[s]:g}",
-                                              callback_data=f"b:{game}:win:{s}") for s in ("1", "2")])
+            bets.append([InlineKeyboardButton(text=f"{betting.describe_pick('win', x, info)} ×{odds[x]:g}",
+                                              callback_data=f"b:{game}:win:{x}") for x in ("1", "2")])
         if info["line"] is not None and "O" in odds and "U" in odds:
-            bets.append([InlineKeyboardButton(
-                text=f"{betting.describe_pick('total', s + format(info['line'], 'g'))} ×{odds[s]:g}",
-                callback_data=f"b:{game}:total:{s}") for s in ("O", "U")])
-    rows = [*bets, *[[InlineKeyboardButton(text=f"💰 {s}", callback_data=f"st:{s}") for s in row] for row in STAKE_ROWS]]
+            bets.append([InlineKeyboardButton(text=f"{betting.describe_pick('total', x + format(info['line'], 'g'))} ×{odds[x]:g}",
+                                              callback_data=f"b:{game}:total:{x}") for x in ("O", "U")])
+    rows = [*bets, *[[InlineKeyboardButton(text=f"💰 {x}{' ✓' if x == stake else ''}", callback_data=f"st:{x}")
+                      for x in row] for row in STAKE_ROWS]]
     if tournament_on:
         rows.append([
-            InlineKeyboardButton(text=t("card_btn_tour"), callback_data="w:tour"),
-            InlineKeyboardButton(text=t("card_btn_main"), callback_data="w:main"),
+            InlineKeyboardButton(text=t("card_btn_tour") + (" ✓" if wallet == "tour" else ""), callback_data="w:tour"),
+            InlineKeyboardButton(text=t("card_btn_main") + (" ✓" if wallet == "main" else ""), callback_data="w:main"),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def pen_card_text(game: int, info: dict, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
-    return (f"⚽️ <b>#N{game}</b> · {t('card_closed') if closed else t('card_open')} · "
-            f"{escape(info['home'])} — {escape(info['away'])} · {sum(counts.values())}")
+    total = sum(counts.values())
+    return "\n".join([
+        f"⚽️ {status_line(game, closed)}",
+        f"{escape(info['home'])} — {escape(info['away'])}",
+        f"{bar(total)} {t('card_total', n=total)}",
+    ])
 
 
 def pen_card_keyboard(game: int, info: dict, tournament_on: bool, bot_username: str | None,
@@ -139,8 +170,18 @@ async def send_picker(cfg: Config, db: DB, bot: Bot, chat_id: int, game: int) ->
         odds = t("card_odds", suit=f"{cfg.payout_suit:g}", p=f"{cfg.payout_player:g}", t=f"{cfg.payout_tie:g}")
     else:
         odds = t("pen_card_hint")
-    await bot.send_message(chat_id, t("picker_title", game=game) + "\n" + odds,
-                           reply_markup=picker_keyboard(game, info, on))
+    user = await db.get_user(chat_id)  # в личке chat_id совпадает с id игрока
+    lines = [t("picker_title", game=game), odds]
+    mine = [b for b in await db.user_open_bets(chat_id) if b["game"] == game]
+    if mine:
+        lines.append(t("picker_mine", items=", ".join(
+            f"{describe_pick_text(b)} · {b['amount']}" for b in mine)))
+    await bot.send_message(chat_id, "\n".join(lines),
+                           reply_markup=picker_keyboard(game, info, on, user["pref_stake"], user["pref_wallet"]))
+
+
+def describe_pick_text(bet) -> str:
+    return betting.describe_pick(bet["kind"], bet["pick"])
 
 
 def _since(cfg: Config) -> int:

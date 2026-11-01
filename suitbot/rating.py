@@ -10,6 +10,12 @@ from .tournament import place_mark
 POPUP_LIMIT = 200  # Telegram обрезает всплывающее окно после 200 символов
 
 
+def _bar(bal: int, top: int, cells: int = 6) -> str:
+    """Полоска относительно лидера: видно, насколько игроки отстают."""
+    filled = max(0, min(cells, round(cells * bal / top)))
+    return "▰" * filled + "▱" * (cells - filled)
+
+
 def _short(name: str, n: int = 12) -> str:
     return name if len(name) <= n else name[: n - 1] + "…"
 
@@ -52,7 +58,8 @@ async def full_text(cfg: Config, db: DB, user_id: int) -> str:
     if not rows:
         return t("rating_empty", title=title)
     lines = [f"<b>{t('rating_top', title=title, n=len(rows))}</b>"]
-    lines += [f"{place_mark(i)} {escape(name)} — {bal}" for i, (name, bal) in enumerate(rows)]
+    top = max((bal for _, bal in rows), default=1) or 1
+    lines += [f"{place_mark(i)} {escape(name)} {_bar(bal, top)} {bal}" for i, (name, bal) in enumerate(rows)]
     if place:
         lines.append(t("rating_me_full", place=place, balance=balance))
     elif title.startswith("🏆"):

@@ -388,15 +388,19 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
             payout = int(bet["amount"] * bet["coef"]) if won else 0
             if not await db.settle_bet(bet["id"], won, payout):
                 continue  # уже рассчитана (например, повторное редактирование поста)
-            mark = f"✅ +{payout}" if won else f"❌ −{bet['amount']}"
-            cup = "🏆 " if bet["wallet"] == "tour" else ""
+            if won:
+                mark = f"✅ +{payout}" + (" 🔥" if payout >= 1000 else "")
+            else:
+                mark = f"❌ −{bet['amount']}"
+            cup = "🏆" if bet["wallet"] == "tour" else ""
             reports[bet["chat_id"]].append(
-                f"{cup}{escape(bet['name'])}: {describe_pick(bet['kind'], bet['pick'], info)} {mark}"
+                f"{cup}{escape(bet['name'])} {describe_pick(bet['kind'], bet['pick'], info)} {mark}".strip()
             )
 
         for chat_id, lines in reports.items():
             try:
-                await bot.send_message(chat_id, "\n".join([header, *lines]))
+                # Одна строка на всех: кто на что ставил и чем кончилось.
+                await bot.send_message(chat_id, f"{header}\n{' · '.join(lines)}")
             except Exception:
                 log.exception("failed to post results to %s", chat_id)
 
