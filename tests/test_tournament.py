@@ -172,7 +172,7 @@ def test_card_frequency_and_closing(tmp_path):
         assert bot.sent == []
         await cards.maybe_post(CFG, db, bot, 209, -100)  # на 210 — кратно 5
         await cards.maybe_post(CFG, db, bot, 209, -100)  # повтор не дублирует
-        assert len(bot.sent) == 1 and "Игра #N210" in bot.sent[0][1]
+        assert len(bot.sent) == 1 and "#N210" in bot.sent[0][1]
 
         await db.set_state("card_every", "0")
         await cards.maybe_post(CFG, db, bot, 213, -100)
@@ -287,7 +287,7 @@ def test_group_with_channel_posts_becomes_main_chat(tmp_path):
         }})
         await dp.feed_update(bot, update)
         assert await db.get_state("main_chat") == "-100777"
-        assert bot.sent[0][0] == -100777 and "Игра #N273" in bot.sent[0][1]
+        assert bot.sent[0][0] == -100777 and "#N273" in bot.sent[0][1]
 
     run_with_db(tmp_path, body)
 

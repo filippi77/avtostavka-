@@ -8,16 +8,15 @@ from aiogram.types import Update
 from suitbot import cards
 from suitbot.access import SubscriptionChecker
 from suitbot.bot import build_router, display_name
-from suitbot.cards import group_keyboard
+from suitbot.cards import card_keyboard
 
 from test_tournament import CFG, FakeBot, run_with_db
 
 
-def test_group_card_has_only_private_button(tmp_path):
-    kb = group_keyboard(208, "suit_bot")
-    urls = [b.url for row in kb.inline_keyboard for b in row if b.url]
-    assert "https://t.me/suit_bot?start=g208" in urls
-    assert not any(b.callback_data and b.callback_data.startswith("b:") for row in kb.inline_keyboard for b in row)
+def test_group_card_has_bet_buttons(tmp_path):
+    kb = card_keyboard(208, False, "suit_bot")
+    data = [b.callback_data for row in kb.inline_keyboard for b in row if b.callback_data]
+    assert "b:208:suit:♥" in data and "b:208:side:P" in data and "st:50" in data
 
 
 def test_private_pick_records_bet_in_main_chat(tmp_path):

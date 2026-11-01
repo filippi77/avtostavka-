@@ -41,21 +41,28 @@ def frequency_label(every: int) -> str:
 
 
 def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
-    """Короткая карточка: номер игры, статус и число ставок. Коэффициенты — в личке."""
-    total = sum(counts.values())
-    return "\n".join([
-        t("card_title", game=game, status=t("card_closed") if closed else t("card_open")),
-        t("card_total", n=total),
-    ])
+    return f"🎴 <b>#N{game}</b> · {t('card_closed') if closed else t('card_open')} · {sum(counts.values())}"
 
 
-def group_keyboard(game: int, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
-    """Одна строка под карточкой: «Сделать ставку» (личка) и рейтинг. Выбор мастей в чате не виден."""
-    row = []
+def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
+        [InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
+         for code in betting.SIDES],
+        *[[InlineKeyboardButton(text=f"💰 {x}", callback_data=f"st:{x}") for x in row] for row in STAKE_ROWS],
+    ]
+    if tournament_on:
+        rows.append([
+            InlineKeyboardButton(text=t("card_btn_tour"), callback_data="w:tour"),
+            InlineKeyboardButton(text=t("card_btn_main"), callback_data="w:main"),
+        ])
+    last = [InlineKeyboardButton(text=t("card_btn_rating"), callback_data="rate")]
+    if duels_on:
+        last.append(InlineKeyboardButton(text=t("card_btn_duel"), callback_data="duel:help"))
     if bot_username:
-        row.append(InlineKeyboardButton(text=t("card_btn_bet"), url=f"https://t.me/{bot_username}?start=g{game}"))
-    row.append(InlineKeyboardButton(text=t("card_btn_rating"), callback_data="rate"))
-    return InlineKeyboardMarkup(inline_keyboard=[row])
+        last.append(InlineKeyboardButton(text=t("card_btn_cabinet"), url=f"https://t.me/{bot_username}?start=menu"))
+    rows.append(last)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def picker_keyboard(game: int, info: dict | None, tournament_on: bool) -> InlineKeyboardMarkup:
@@ -84,19 +91,22 @@ def picker_keyboard(game: int, info: dict | None, tournament_on: bool) -> Inline
 
 
 def pen_card_text(game: int, info: dict, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
-    over = sum(n for pick, n in counts.items() if pick.startswith("O"))
-    under = sum(n for pick, n in counts.items() if pick.startswith("U"))
-    return "\n".join([
-        t("pen_card_title", game=game, status=t("card_closed") if closed else t("card_open"),
-          home=escape(info["home"]), away=escape(info["away"])),
-        t("card_total", n=sum(counts.values())),
-    ])
+    return (f"⚽️ <b>#N{game}</b> · {t('card_closed') if closed else t('card_open')} · "
+            f"{escape(info['home'])} — {escape(info['away'])} · {sum(counts.values())}")
 
 
 def pen_card_keyboard(game: int, info: dict, tournament_on: bool, bot_username: str | None,
                       duels_on: bool = False) -> InlineKeyboardMarkup:
-    """Под карточкой серии в чате — общая клавиатура; коэффициенты видны в личке при выборе."""
-    return group_keyboard(game, bot_username, duels_on)
+    odds = info["odds"]
+    rows = []
+    if "1" in odds and "2" in odds:
+        rows.append([InlineKeyboardButton(text=f"{betting.describe_pick('win', x, info)} ×{odds[x]:g}",
+                                          callback_data=f"b:{game}:win:{x}") for x in ("1", "2")])
+    if info["line"] is not None and "O" in odds and "U" in odds:
+        rows.append([InlineKeyboardButton(text=f"{betting.describe_pick('total', x + format(info['line'], 'g'))} ×{odds[x]:g}",
+                                          callback_data=f"b:{game}:total:{x}") for x in ("O", "U")])
+    base = card_keyboard(game, tournament_on, bot_username, duels_on).inline_keyboard
+    return InlineKeyboardMarkup(inline_keyboard=[*rows, *base[2:]])  # суммы, кошелёк и нижний ряд — как в баккаре
 
 
 async def _render(cfg: Config, db: DB, game: int, counts: dict[str, int], closed: bool, me_username: str | None):
@@ -109,7 +119,7 @@ async def _render(cfg: Config, db: DB, game: int, counts: dict[str, int], closed
             return None
         kb = None if closed else pen_card_keyboard(game, info, on, me_username, duels_on)
         return pen_card_text(game, info, counts, closed, on), kb
-    kb = None if closed else group_keyboard(game, me_username, duels_on)
+    kb = None if closed else card_keyboard(game, on, me_username, duels_on)
     return card_text(cfg, game, counts, closed, on), kb
 
 
