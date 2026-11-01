@@ -21,7 +21,7 @@ from aiogram.types import (
     User,
 )
 
-from . import activity, admin, betting, cards, duels, i18n, penalty, rating, shop
+from . import activity, admin, betting, cards, duels, i18n, penalty, quick, rating, shop
 from . import tournament as tour
 from .access import SubscriptionChecker
 from .betting import describe_pick
@@ -543,6 +543,9 @@ async def main() -> None:
     dp.include_router(duels.build_router(
         cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
     ))
+    dp.include_router(quick.build_router(
+        cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username), subs
+    ))
     dp.include_router(shop.build_router(
         cfg, db, lambda user: db.ensure_user(user.id, display_name(user), cfg.start_balance, user.username)
     ))
@@ -562,6 +565,7 @@ async def main() -> None:
         tasks.append(asyncio.create_task(penalty_close_loop(cfg, db, bot)))
     if cfg.tournament_enabled:
         tasks.append(asyncio.create_task(tour.loop(cfg, db, bot)))
+    await quick.set_commands(cfg, bot)
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:

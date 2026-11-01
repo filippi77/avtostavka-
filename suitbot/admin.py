@@ -9,7 +9,7 @@ from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from . import activity, cards, duels, i18n, shop
+from . import activity, cards, duels, i18n, quick, shop
 from .i18n import t
 from . import tournament as tour
 from .config import Config
@@ -222,6 +222,7 @@ def build_router(cfg: Config, db: DB) -> Router:
         if action == "lang":
             await db.set_state("lang", parts[2])
             i18n.set_lang(parts[2])
+            await quick.set_commands(cfg, bot)  # меню «/» — на новом языке
             note = f"Язык для игроков: {i18n.LANGS[i18n.LANG]}. Новые карточки и сообщения — на нём."
         elif action == "shop":
             on = await shop.shop_on(cfg, db)

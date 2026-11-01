@@ -453,6 +453,29 @@ TEXTS: dict[str, tuple[str, str]] = {
     "shop_title_news": ("🏷 Новое звание в чате: {name} — «{title}» на {days} дн.! Магазин — в личке с ботом.",
                         "🏷 {name} yangi «{title}» unvonini {days} kunga oldi! Do'kon — bot bilan shaxsiy chatda."),
 
+    # --- меню команд «/» ---
+    "cmd_spades": ("♠️ Пики у игрока — ставка на ближайшую игру", "♠️ Qarg'a o'yinchida — eng yaqin o'yinga stavka"),
+    "cmd_clubs": ("♣️ Крести у игрока — ставка на ближайшую игру", "♣️ Chillak o'yinchida — eng yaqin o'yinga stavka"),
+    "cmd_hearts": ("♥️ Черви у игрока — ставка на ближайшую игру", "♥️ Chirvo o'yinchida — eng yaqin o'yinga stavka"),
+    "cmd_diamonds": ("♦️ Буби у игрока — ставка на ближайшую игру", "♦️ G'isht o'yinchida — eng yaqin o'yinga stavka"),
+    "cmd_player": ("Победа игрока — ставка на ближайшую игру", "O'yinchi g'alabasi — eng yaqin o'yinga stavka"),
+    "cmd_banker": ("Победа банкира — ставка на ближайшую игру", "Bankir g'alabasi — eng yaqin o'yinga stavka"),
+    "cmd_tie": ("Ничья — ставка на ближайшую игру", "Durrang — eng yaqin o'yinga stavka"),
+    "cmd_p1": ("П1 — победа первой команды в ближайшей серии", "P1 — eng yaqin seriyada birinchi jamoa g'alabasi"),
+    "cmd_p2": ("П2 — победа второй команды в ближайшей серии", "P2 — eng yaqin seriyada ikkinchi jamoa g'alabasi"),
+    "cmd_over": ("ТБ — тотал больше в ближайшей серии", "TB — eng yaqin seriyada total ko'p"),
+    "cmd_under": ("ТМ — тотал меньше в ближайшей серии", "TM — eng yaqin seriyada total kam"),
+    "cmd_duel": ("⚔️ Дуэль: ответьте сопернику /duel 500", "⚔️ Duel: raqibga /duel 500 deb javob bering"),
+    "cmd_top": ("📊 Рейтинг игроков", "📊 O'yinchilar reytingi"),
+    "cmd_start": ("Начать играть / кабинет", "O'ynashni boshlash / kabinet"),
+    "cmd_balance": ("💰 Мой баланс", "💰 Balansim"),
+    "cmd_shop": ("🛒 Магазин", "🛒 Do'kon"),
+    "cmd_bonus": ("🎁 Бонус", "🎁 Bonus"),
+    "cmd_spin": ("🎰 Крутилка", "🎰 Aylantirish"),
+    "cmd_tournament": ("🏆 Турнир", "🏆 Turnir"),
+    "cmd_active": ("🔥 Актив недели", "🔥 Hafta faolligi"),
+    "cmd_help": ("❓ Как играть", "❓ Qanday o'ynash"),
+
     # --- режим пенальти ---
     "welcome@pen": (
         "👋 Привет! Это игра в прогнозы на серии пенальти. Кнопки внизу — ваш кабинет.",
