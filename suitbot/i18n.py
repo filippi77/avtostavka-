@@ -187,6 +187,7 @@ TEXTS: dict[str, tuple[str, str]] = {
     "card_btn_bet": ("🎯 Сделать ставку", "🎯 Stavka qilish"),
     "picker_title": ("🎯 <b>Ставка на #N{game}</b>\nЭтот выбор видите только вы. Сумму можно поменять — она запоминается.",
                      "🎯 <b>#N{game} ga stavka</b>\nBu tanlovni faqat siz ko'rasiz. Summani o'zgartirish mumkin — eslab qolinadi."),
+    "card_total": ("Ставок: {n}", "Stavkalar: {n}"),
     "picker_closed": ("Ставки на #N{game} уже закрыты.", "#N{game} ga stavkalar yopilgan."),
     "card_btn_tour": ("🏆 Турнир", "🏆 Turnir"),
     "card_btn_main": ("Обычные фишки", "Oddiy fishkalar"),

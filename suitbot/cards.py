@@ -41,29 +41,21 @@ def frequency_label(every: int) -> str:
 
 
 def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
-    picks = " · ".join(f"{suit_label(s)} {counts.get(s, 0)}" for s in SUITS)
-    lines = [
+    """Короткая карточка: номер игры, статус и число ставок. Коэффициенты — в личке."""
+    total = sum(counts.values())
+    return "\n".join([
         t("card_title", game=game, status=t("card_closed") if closed else t("card_open")),
-        t("card_odds", suit=f"{cfg.payout_suit:g}", p=f"{cfg.payout_player:g}", t=f"{cfg.payout_tie:g}"),
-        t("card_counts", picks=picks, P=counts.get("P", 0), B=counts.get("B", 0), T=counts.get("T", 0)),
-    ]
-    if not closed:
-        lines.append(t("card_hint_tour") if tournament_on else t("card_hint"))
-    return "\n".join(lines)
+        t("card_total", n=total),
+    ])
 
 
 def group_keyboard(game: int, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
-    """Кнопки под карточкой в чате. Выбор мастей не виден остальным: он в личке с ботом."""
-    rows = []
+    """Одна строка под карточкой: «Сделать ставку» (личка) и рейтинг. Выбор мастей в чате не виден."""
+    row = []
     if bot_username:
-        rows.append([InlineKeyboardButton(text=t("card_btn_bet"), url=f"https://t.me/{bot_username}?start=g{game}")])
-    last_row = [InlineKeyboardButton(text=t("card_btn_rating"), callback_data="rate")]
-    if duels_on:
-        last_row.append(InlineKeyboardButton(text=t("card_btn_duel"), callback_data="duel:help"))
-    if bot_username:
-        last_row.append(InlineKeyboardButton(text=t("card_btn_cabinet"), url=f"https://t.me/{bot_username}?start=menu"))
-    rows.append(last_row)
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        row.append(InlineKeyboardButton(text=t("card_btn_bet"), url=f"https://t.me/{bot_username}?start=g{game}"))
+    row.append(InlineKeyboardButton(text=t("card_btn_rating"), callback_data="rate"))
+    return InlineKeyboardMarkup(inline_keyboard=[row])
 
 
 def picker_keyboard(game: int, info: dict | None, tournament_on: bool) -> InlineKeyboardMarkup:
@@ -94,14 +86,11 @@ def picker_keyboard(game: int, info: dict | None, tournament_on: bool) -> Inline
 def pen_card_text(game: int, info: dict, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
     over = sum(n for pick, n in counts.items() if pick.startswith("O"))
     under = sum(n for pick, n in counts.items() if pick.startswith("U"))
-    lines = [
+    return "\n".join([
         t("pen_card_title", game=game, status=t("card_closed") if closed else t("card_open"),
           home=escape(info["home"]), away=escape(info["away"])),
-        t("pen_card_counts", w1=counts.get("1", 0), w2=counts.get("2", 0), o=over, u=under),
-    ]
-    if not closed:
-        lines.append(t("pen_card_hint_tour") if tournament_on else t("pen_card_hint"))
-    return "\n".join(lines)
+        t("card_total", n=sum(counts.values())),
+    ])
 
 
 def pen_card_keyboard(game: int, info: dict, tournament_on: bool, bot_username: str | None,
@@ -136,7 +125,11 @@ async def send_picker(cfg: Config, db: DB, bot: Bot, chat_id: int, game: int) ->
         if not info:
             await bot.send_message(chat_id, t("bet_no_games"))
             return
-    await bot.send_message(chat_id, t("picker_title", game=game),
+    if info is None:
+        odds = t("card_odds", suit=f"{cfg.payout_suit:g}", p=f"{cfg.payout_player:g}", t=f"{cfg.payout_tie:g}")
+    else:
+        odds = t("pen_card_hint")
+    await bot.send_message(chat_id, t("picker_title", game=game) + "\n" + odds,
                            reply_markup=picker_keyboard(game, info, on))
 
 
