@@ -1234,6 +1234,20 @@ def grox_state(chat_id):
     return st
 
 
+TEN_NEED = 10    # сигнал «Десятка»: N игр подряд без ничьи, раздачи, 21 у Игрока и Голда
+ten_streak = {}  # chat_id -> сколько игр подряд без этих исходов
+
+
+def ten_on():
+    return bool(cfg.get("ten_on", True))
+
+
+def ten_is_clean(text):
+    pts = [int(x) for x in re.findall(r"(\d+)\s*\(", text or "")[:2]]
+    player21 = bool(pts) and pts[0] == 21
+    return not (player21 or any(grox_hit(k, text) for k in ("x", "r", "g")))
+
+
 def grox_hit(key, text):
     """Зашла ли линия в этой игре: x — ничья, o — у кого-то 21, g — два туза."""
     t = text or ""
@@ -1390,7 +1404,8 @@ def grox_text(chat_id, start):
     if not rows:
         return None
     sg = lambda v: ("+" if v >= 0 else "−") + money(abs(v))
-    lines = ["<b>🎰 21GROX</b>", "", f"<b>▶️ Ставим с игры #{start}</b>"]
+    src = "🔟 Десятка" if any(r.get("src") == "ten" for r in rows) else "🃏 Нет масти"
+    lines = ["<b>🎰 21GROX</b>", f"<i>Сигнал: {src}</i>", "", f"<b>▶️ Ставим с игры #{start}</b>"]
     for i, r in enumerate(rows):
         tree = "└" if i == len(rows) - 1 else "├"
         name = GROX_LABEL.get(r["key"], r["em"])
@@ -1513,18 +1528,27 @@ def process_grox(chat_id, text):
     # прошлого сигнала, новый сигнал это событие не берёт (не ставим 2-3 раза подряд)
     busy = {r["key"] for r in st["rows"] if r["status"] == "⏳"}
     keys = [(k, em, stk) for k, em, stk, _ in GROX_LINES if grox_enabled(k) and k not in busy]
+    if ten_is_clean(text) and not reset:
+        ten_streak[chat_id] = int(ten_streak.get(chat_id, 0)) + 1
+    else:
+        ten_streak[chat_id] = 0
     if keys:
         d, total = suit_drought(chat_id)
         need = grox_need()
         fresh = [e for e, v in d.items() if v == need] if total >= need else []
+        src = "drought"
+        if ten_on() and int(ten_streak.get(chat_id, 0)) >= TEN_NEED:
+            fresh, src = ["🔟"], "ten"            # «Десятка» — сигнал без масти
         if fresh and not any(r["start"] == g + 1 for r in st["rows"]):
+            if src == "ten":
+                ten_streak[chat_id] = 0
             suit = random.choice(fresh)
             for k, em, stk in keys:
                 stakes = grox_stakes(k) if "grox_stakes" in globals() else list(stk)
                 row = {"start": g + 1, "suit": suit, "key": k, "em": em,
                        "stakes": stakes, "odds": grox_odds(k),
                        "n": 0, "status": "⏳",
-                       "sid": time.strftime("%d%m") + f"-{g + 1}{k}"}
+                       "sid": time.strftime("%d%m") + f"-{g + 1}{k}", "src": src}
                 st["rows"].append(row)
                 if k in AUTO21_OUT:
                     auto21_add(auto21_line("BET", row, g + 1, step=1, max=len(stakes),
@@ -1543,6 +1567,8 @@ def grox_panel_text():
              f" последнее {st['last_ok']}, ошибок {st['errors']}"
              + (f" — {html.escape(st['last_err'])}" if st["last_err"] else ""),
              f"Догон ставок: {('×' + format(float(cfg['grox_mult']), 'g')) if cfg.get('grox_mult') else 'стандарт'}",
+             f"🔟 Сигнал «Десятка»: {onoff(ten_on())} ({TEN_NEED} игр подряд без ничьи / раздачи /"
+             f" 21 у Игрока / Голда; сейчас {max(ten_streak.values() or [0])})",
              f"Сигнал: масти нет у Игрока {grox_need()} игр подряд → линии догоном:"]
     for k, em, stk, _ in GROX_LINES:
         lines.append(f"{'✅' if grox_enabled(k) else '⛔'} {em} {GROX_NAMES[k]}: "
@@ -1568,6 +1594,7 @@ def grox_panel_text():
 
 def grox_panel_kb():
     kb = types.InlineKeyboardMarkup(row_width=3)
+    kb.add(btn(f"🔟 Сигнал «Десятка»: {onoff(ten_on())}", "ten:toggle"))
     kb.add(btn("Сколько игр нет масти 👇", "noop"))
     kb.row(*[btn(("✅ " if grox_need() == n else "") + f"{n} игр", f"gxn:{n}") for n in (2, 3, 4, 5)])
     tg = [btn(("✅ " if grox_enabled(k) else "⛔ ") + GROX_NAMES[k].split(" (")[0], f"gxt:{k}")
@@ -2442,6 +2469,9 @@ def on_button(c):
     elif d == "menu:fin":
         screen = "fin"
     elif d == "menu:grox":
+        screen = "grox"
+    elif d == "ten:toggle":
+        cfg["ten_on"] = not ten_on()
         screen = "grox"
     elif d.startswith("gxn:"):
         cfg["grox_n"] = int(d[4:])
