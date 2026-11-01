@@ -22,8 +22,8 @@ from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
 from . import activity, i18n
-from .i18n import t
-from .parser import SUITS, suit_emoji
+from .i18n import suit_label, t
+from .parser import SUITS
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def _options(cfg: Config) -> list[str]:
 
 
 def _label(cfg: Config, pick: str) -> str:
-    return t("duel_p", side=pick) if cfg.game == "penalty" else suit_emoji(pick)
+    return t("duel_p", side=pick) if cfg.game == "penalty" else suit_label(pick)
 
 
 def _name(name: str | None, n: int = 14) -> str:

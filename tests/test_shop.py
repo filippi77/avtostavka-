@@ -144,3 +144,15 @@ def test_valid_title():
     finally:
         i18n.set_lang("ru")
         i18n.set_game("baccarat")
+
+
+def test_suit_labels_have_russian_names():
+    from suitbot import i18n
+    try:
+        i18n.set_lang("ru")
+        assert i18n.suit_label("♠") == "♠️ Пики"
+        assert i18n.suit_label("♥") == "♥️ Черви"
+        i18n.set_lang("uz")
+        assert i18n.suit_label("♣").endswith("Chillak")
+    finally:
+        i18n.set_lang("ru")

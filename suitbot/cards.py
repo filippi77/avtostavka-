@@ -20,8 +20,8 @@ from . import activity, betting, duels, rating
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
-from .i18n import t
-from .parser import SUITS, suit_emoji
+from .i18n import suit_label, t
+from .parser import SUITS
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def frequency_label(every: int) -> str:
 
 
 def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tournament_on: bool) -> str:
-    picks = " · ".join(f"{suit_emoji(s)} {counts.get(s, 0)}" for s in SUITS)
+    picks = " · ".join(f"{suit_label(s)} {counts.get(s, 0)}" for s in SUITS)
     lines = [
         t("card_title", game=game, status=t("card_closed") if closed else t("card_open")),
         t("card_odds", suit=f"{cfg.payout_suit:g}", p=f"{cfg.payout_player:g}", t=f"{cfg.payout_tie:g}"),
@@ -53,7 +53,7 @@ def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tour
 
 def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=suit_emoji(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
+        [InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
         [
             InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
             for code in betting.SIDES

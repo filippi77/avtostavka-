@@ -4,8 +4,7 @@ import time
 
 from .config import Config
 from .db import DB, InsufficientFunds
-from .i18n import t
-from .parser import suit_emoji
+from .i18n import suit_label, t
 
 SIDES = ("P", "B", "T")
 
@@ -20,7 +19,7 @@ class BetError(Exception):
 
 def describe_pick(kind: str, pick: str, info: dict | None = None) -> str:
     if kind == "suit":
-        return suit_emoji(pick)
+        return suit_label(pick)
     if kind == "side":
         return side_name(pick)
     if kind == "win":

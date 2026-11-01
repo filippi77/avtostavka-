@@ -56,7 +56,7 @@ def test_full_duel_hidden_picks_and_winner(tmp_path):
         # игра 208 началась — масти раскрываются, выбор переходит на 209
         await db.mark_game_seen(208, fresh_after=0)
         await duels.on_game_started(DCFG, db, bot, 208)
-        assert "игра идёт — Руслан ♥️ · Алсу ♠️" in bot.edits[-1]
+        assert "игра идёт — Руслан ♥️ Черви · Алсу ♠️ Пики" in bot.edits[-1]
         assert bot.last_markup.inline_keyboard[0][0].callback_data.endswith(":209:♠")
 
         await duels.on_game_result(DCFG, db, bot, 208, post(208, "10♥ 5♦").player_suits)  # ♥ есть, ♠ нет

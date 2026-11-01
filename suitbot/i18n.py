@@ -21,6 +21,14 @@ def set_game(game: str) -> None:
     GAME = game
 
 
+SUIT_KEYS = {"♠": "S", "♣": "C", "♥": "H", "♦": "D"}
+
+
+def suit_label(suit: str) -> str:
+    """Масть с названием: «♠ Пики» / «♠ Qarg'a»."""
+    return f"{suit}{'\ufe0f'} {t(f'suit_{SUIT_KEYS[suit]}')}"
+
+
 def t(key: str, **kwargs) -> str:
     if GAME == "penalty" and f"{key}@pen" in TEXTS:
         key = f"{key}@pen"
@@ -452,6 +460,12 @@ TEXTS: dict[str, tuple[str, str]] = {
                   "🛒 Kabinetdagi do'kon: ism yonidagi belgi — {badge}, chatdagi unvon — {title}, VIP — {vip} fishka.\n"),
     "shop_title_news": ("🏷 Новое звание в чате: {name} — «{title}» на {days} дн.! Магазин — в личке с ботом.",
                         "🏷 {name} yangi «{title}» unvonini {days} kunga oldi! Do'kon — bot bilan shaxsiy chatda."),
+
+    # --- названия мастей ---
+    "suit_S": ("Пики", "Qarg'a"),
+    "suit_C": ("Крести", "Chillak"),
+    "suit_H": ("Черви", "Chirvo"),
+    "suit_D": ("Буби", "G'isht"),
 
     # --- меню команд «/» ---
     "cmd_spades": ("♠️ Пики у игрока — ставка на ближайшую игру", "♠️ Qarg'a o'yinchida — eng yaqin o'yinga stavka"),
