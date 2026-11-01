@@ -1172,7 +1172,7 @@ def five_is_clean(text):
 
 
 
-GROX_STOP_KEYS = {"x", "g", "c4", "r"}  # стоп; «21» (o) не останавливает
+GROX_STOP_KEYS = {"x", "g", "c4", "r", "p21"}  # стоп; «Игрок 21» (p21) тоже; общий «21» (o) — нет
 
 
 def grox_stop_mode():
@@ -1634,6 +1634,12 @@ def a21k_early(chat_id, text):
     dealer0 = _a21k_dealer0.get((chat_id, g))
     with column_lock:
         st = grox_state(chat_id)
+        # сигналы, где стоп-линия (Игрок 21) уже зашла по ходу игры: при «стопе при
+        # заходе» остальные линии этого сигнала на следующую игру не ставим
+        stop_starts = set()
+        if grox_stop_on_hit() and pts and pts[0] == 21 and "p21" in GROX_STOP_KEYS:
+            stop_starts = {r["start"] for r in st["rows"]
+                           if r["status"] == "⏳" and r["key"] == "p21"}
         for r in st["rows"]:
             if r["status"] != "⏳" or not a21k_on(chat_id, r):
                 continue
@@ -1651,7 +1657,7 @@ def a21k_early(chat_id, text):
                 continue
             _a21k_early.add((r["sid"], g))
             a21k_add(a21k_line("RESULT", r, g, win=0))
-            if n < len(r["stakes"]):
+            if n < len(r["stakes"]) and r["start"] not in stop_starts:
                 a21k_add(a21k_line("BET", r, g + 1, step=n + 1, max=len(r["stakes"]),
                                    kf=format(r["odds"], "g")))
     if len(_a21k_early) > 500:
@@ -1909,7 +1915,7 @@ def grox_panel_text():
              f"({FIVE_NEED} игр подряд без ничьи / 21 / 4 карт)",
              f"♦️ Стратегия бубна: {onoff(diam_on())} "
              f"(♦️ комбинация → сигнал через {DIAM_LEAD} игр)",
-             f"🛑 Стоп при заходе: <b>{grox_stop_label()}</b> (21 не стопит)",
+             f"🛑 Стоп при заходе: <b>{grox_stop_label()}</b> (Игрок 21 стопит, общий 21 — нет)",
              "   • РЕАЛЬНЫЙ — гасим догоны; вирт. «если бы не стоп»",
              "   • ВИРТУАЛЬНЫЙ — догоны идут; вирт. «если бы стоп»",
              f"⏭ Старт ставок: через {int(cfg.get('grox_lead', GROX_LEAD))} игр (#{100}→#{102})",
