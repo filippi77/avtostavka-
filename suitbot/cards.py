@@ -14,6 +14,7 @@ import time
 from html import escape
 
 from aiogram import Bot, F, Router
+from aiogram.enums import ChatType
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from . import activity, betting, duels, rating
@@ -51,26 +52,42 @@ def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tour
     return "\n".join(lines)
 
 
-def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
-        [
-            InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
-            for code in betting.SIDES
-        ],
-        *[[InlineKeyboardButton(text=f"💰 {s}", callback_data=f"st:{s}") for s in row] for row in STAKE_ROWS],
-    ]
-    if tournament_on:
-        rows.append([
-            InlineKeyboardButton(text=t("card_btn_tour"), callback_data="w:tour"),
-            InlineKeyboardButton(text=t("card_btn_main"), callback_data="w:main"),
-        ])
+def group_keyboard(game: int, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
+    """Кнопки под карточкой в чате. Выбор мастей не виден остальным: он в личке с ботом."""
+    rows = []
+    if bot_username:
+        rows.append([InlineKeyboardButton(text=t("card_btn_bet"), url=f"https://t.me/{bot_username}?start=g{game}")])
     last_row = [InlineKeyboardButton(text=t("card_btn_rating"), callback_data="rate")]
     if duels_on:
         last_row.append(InlineKeyboardButton(text=t("card_btn_duel"), callback_data="duel:help"))
     if bot_username:
         last_row.append(InlineKeyboardButton(text=t("card_btn_cabinet"), url=f"https://t.me/{bot_username}?start=menu"))
     rows.append(last_row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def picker_keyboard(game: int, info: dict | None, tournament_on: bool) -> InlineKeyboardMarkup:
+    """Выбор ставки в личке: масти или исход, сумма, кошелёк. Видит только игрок."""
+    if info is None:
+        bets = [[InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
+                [InlineKeyboardButton(text=betting.side_name(code).capitalize(), callback_data=f"b:{game}:side:{code}")
+                 for code in betting.SIDES]]
+    else:
+        odds = info["odds"]
+        bets = []
+        if "1" in odds and "2" in odds:
+            bets.append([InlineKeyboardButton(text=f"{betting.describe_pick('win', s, info)} ×{odds[s]:g}",
+                                              callback_data=f"b:{game}:win:{s}") for s in ("1", "2")])
+        if info["line"] is not None and "O" in odds and "U" in odds:
+            bets.append([InlineKeyboardButton(
+                text=f"{betting.describe_pick('total', s + format(info['line'], 'g'))} ×{odds[s]:g}",
+                callback_data=f"b:{game}:total:{s}") for s in ("O", "U")])
+    rows = [*bets, *[[InlineKeyboardButton(text=f"💰 {s}", callback_data=f"st:{s}") for s in row] for row in STAKE_ROWS]]
+    if tournament_on:
+        rows.append([
+            InlineKeyboardButton(text=t("card_btn_tour"), callback_data="w:tour"),
+            InlineKeyboardButton(text=t("card_btn_main"), callback_data="w:main"),
+        ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -89,22 +106,8 @@ def pen_card_text(game: int, info: dict, counts: dict[str, int], closed: bool, t
 
 def pen_card_keyboard(game: int, info: dict, tournament_on: bool, bot_username: str | None,
                       duels_on: bool = False) -> InlineKeyboardMarkup:
-    odds = info["odds"]
-    rows = []
-    if "1" in odds and "2" in odds:
-        rows.append([
-            InlineKeyboardButton(text=f"{betting.describe_pick('win', side, info)} ×{odds[side]:g}",
-                                 callback_data=f"b:{game}:win:{side}")
-            for side in ("1", "2")
-        ])
-    if info["line"] is not None and "O" in odds and "U" in odds:
-        rows.append([
-            InlineKeyboardButton(text=f"{betting.describe_pick('total', f'{side}{info['line']:g}')} ×{odds[side]:g}",
-                                 callback_data=f"b:{game}:total:{side}")
-            for side in ("O", "U")
-        ])
-    base = card_keyboard(game, tournament_on, bot_username, duels_on).inline_keyboard
-    return InlineKeyboardMarkup(inline_keyboard=rows + base[2:])  # суммы, кошелёк и нижний ряд — как в баккаре
+    """Под карточкой серии в чате — общая клавиатура; коэффициенты видны в личке при выборе."""
+    return group_keyboard(game, bot_username, duels_on)
 
 
 async def _render(cfg: Config, db: DB, game: int, counts: dict[str, int], closed: bool, me_username: str | None):
@@ -117,8 +120,24 @@ async def _render(cfg: Config, db: DB, game: int, counts: dict[str, int], closed
             return None
         kb = None if closed else pen_card_keyboard(game, info, on, me_username, duels_on)
         return pen_card_text(game, info, counts, closed, on), kb
-    kb = None if closed else card_keyboard(game, on, me_username, duels_on)
+    kb = None if closed else group_keyboard(game, me_username, duels_on)
     return card_text(cfg, game, counts, closed, on), kb
+
+
+async def send_picker(cfg: Config, db: DB, bot: Bot, chat_id: int, game: int) -> None:
+    """Личный выбор ставки на игру: приходит игроку в личку по кнопке из чата."""
+    if await db.game_seen_since(game, _since(cfg)):
+        await bot.send_message(chat_id, t("picker_closed", game=game))
+        return
+    on = await _tournament_on(cfg, db)
+    info = None
+    if cfg.game == "penalty":
+        info = await db.get_penalty_game(game, _since(cfg))
+        if not info:
+            await bot.send_message(chat_id, t("bet_no_games"))
+            return
+    await bot.send_message(chat_id, t("picker_title", game=game),
+                           reply_markup=picker_keyboard(game, info, on))
 
 
 def _since(cfg: Config) -> int:
@@ -217,7 +236,14 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
             await query.answer(subs.alert(), show_alert=True)
             return
         tournament_bet = user["pref_wallet"] == "tour" and await _tournament_on(cfg, db)
+        # Ставку из личного выбора записываем на карточку в основном чате, а не в личку.
         chat_id = query.message.chat.id if query.message else query.from_user.id
+        if query.message and query.message.chat.type == ChatType.PRIVATE:
+            main_chat = await db.get_state("main_chat")
+            if not main_chat:
+                await query.answer(t("bet_no_games"), show_alert=True)
+                return
+            chat_id = int(main_chat)
         if await db.game_seen_since(int(game), _since(cfg)):
             await query.answer(t("bet_started", game=game), show_alert=True)
             return

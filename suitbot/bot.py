@@ -127,6 +127,12 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         # Регистрация — это просто первое обращение к боту: аккаунт со стартовыми
         # фишками создаётся автоматически (здесь, по команде или по кнопке в чате).
         user = await user_row(message.from_user)
+        if command.args and command.args[:1] == "g" and command.args[1:].isdigit():
+            # Кнопка «🎯 Сделать ставку» под карточкой игры: личный выбор ставки.
+            if not await require_sub(message, bot):
+                return
+            await cards.send_picker(cfg, db, bot, message.chat.id, int(command.args[1:]))
+            return
         if command.args == "help":
             await message.answer(help_text(await duels.enabled(cfg, db)), reply_markup=menu_for(message))
             return
