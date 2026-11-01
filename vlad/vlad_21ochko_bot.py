@@ -1168,23 +1168,118 @@ def suit_drought(chat_id):
 #   21 (у кого-то 21):   100-200-400-800-1200
 #   🥇AA Голд (два туза): 100-200-300-400-500
 GROX_NEED = 4        # по умолчанию: игр подряд без масти у Игрока (кнопки 2/3/4/5)
+DIAM_LEAD = 2        # «Стратегия бубна»: сигнал через N игр после комбинации
+GROX_LEAD = 2        # условие на #N → ставки с #N+2
 
 
 def grox_need():
     return int(cfg.get("grox_n", GROX_NEED))
-GROX_LINES = [       # (ключ, значок, ставки, КФ по умолчанию)
-    ("x", "🤝", [100, 200, 300, 400, 500], 12.0),
-    ("o", "21", [100, 200, 400, 800, 1200], 4.89),
-    ("g", "🥇AA", [100, 200, 300, 400, 500], 54.0),
-    ("c4", "🃏4", [100, 200, 300, 400, 500], 6.0),   # у Игрока ровно 4 карты
-    ("r", "🎴", [100, 200, 300, 400, 500], 13.0),   # игра закончится раздачей (по 2 карты)
+
+
+def diam_on():
+    """Стратегия бубна: сигнал 21GROX по комбинации карт с ♦️."""
+    return bool(cfg.get("diam_on", False))
+
+
+FIVE_NEED = 5   # сигнал «Пять»: N игр подряд без X/O/G/R
+five_streak = {}  # chat_id -> сколько чистых игр подряд
+
+
+def grox_parallel():
+    """Дублировать сигналы: новый стартует, даже если старый ещё в догоне."""
+    return bool(cfg.get("grox_parallel", False))
+
+
+def drought_on():
+    """Обычный сигнал 21GROX: масти нет у Игрока N игр подряд."""
+    return bool(cfg.get("drought_on", True))
+
+
+def five_on():
+    """Сигнал «Пять»: 5 игр подряд без ничьи, 21, голда и раздачи."""
+    return bool(cfg.get("five_on", False))
+
+
+TEN_NEED = 10    # сигнал «Десятка»: N игр подряд без ничьи, раздачи, 21 у Игрока и Голда
+TEN_KEYS = ("x", "r", "op", "g")
+ten_streak = {}  # chat_id -> сколько игр подряд без этих исходов
+
+
+def ten_on():
+    return bool(cfg.get("ten_on", True))
+
+
+def ten_is_clean(text):
+    return not any(grox_hit(k, text) for k in TEN_KEYS)
+
+
+def five_is_clean(text):
+    """В игре не было ничьи / 21 / золотого очка / раздачи."""
+    return not (grox_hit("x", text) or grox_hit("o", text)
+                or grox_hit("g", text) or grox_hit("r", text))
+
+
+
+GROX_STOP_KEYS = {"x", "g", "c4", "r", "op"}  # стоп; общее «21» (o) не останавливает; «21 игроку» — стопит
+
+
+def grox_stop_mode():
+    """Стоп при заходе: off | real (гасим догоны) | virt (не гасим, только считаем)."""
+    m = cfg.get("grox_stop_mode")
+    if m in ("off", "real", "virt"):
+        return m
+    # совместимость со старым флагом
+    return "real" if cfg.get("grox_stop_hit") else "off"
+
+
+def grox_stop_on_hit():
+    """Реальная остановка догонов после первого захода."""
+    return grox_stop_mode() == "real"
+
+
+def grox_stop_label():
+    return {"off": "ВЫКЛ", "real": "РЕАЛЬНЫЙ", "virt": "ВИРТУАЛЬНЫЙ"}.get(grox_stop_mode(), "ВЫКЛ")
+
+
+_CARD_FULL_RE = re.compile(r"(10|[2-9JQKA])\s*([♠♣♥❤♦])")
+_SUIT_MAP = {"♠": "♠️", "♣": "♣️", "♥": "♥️", "❤": "♥️", "♦": "♦️"}
+
+
+def hand_suits_ordered(text):
+    """Масти карт по порядку: [[игрок...], [дилер...]]."""
+    parts = re.findall(r"\(([^)]*)\)", text or "")[:2]
+    return [[_SUIT_MAP[s] for _, s in _CARD_FULL_RE.findall(p)] for p in parts]
+
+
+def diamond_pattern(text):
+    """Комбинация «бубна»:
+    1) последняя карта Игрока ♦️ и первая Дилера ♦️
+    2) первая карта Игрока ♦️ и последняя Дилера ♦️
+    """
+    hands = hand_suits_ordered(text)
+    if len(hands) < 2 or not hands[0] or not hands[1]:
+        return False
+    pl, dl = hands[0], hands[1]
+    if pl[-1] == "♦️" and dl[0] == "♦️":
+        return True
+    if pl[0] == "♦️" and dl[-1] == "♦️":
+        return True
+    return False
+GROX_LINES = [       # (ключ, значок, ставки, КФ по умолчанию — DBbet)
+    ("x", "🤝", [100, 200, 300, 400, 500], 14.2),   # Ничья
+    ("o", "21", [100, 200, 400, 800, 1200], 4.29),  # В игре будет 21
+    ("op", "21👤", [100, 200, 400, 800, 1200], 7.7),  # 21 очко у Игрока
+    ("g", "🥇AA", [100, 200, 300, 400, 500], 48.0), # Будет «золотое очко»
+    ("c4", "🃏4", [100, 200, 300, 400, 500], 6.0),  # у Игрока ровно 4 карты
+    ("r", "🎴", [100, 200, 300, 400, 500], 13.1),  # Игра завершится на раздаче
 ]
-GROX_NAMES = {"x": "Ничья", "o": "21 очко", "g": "Голд (2 туза)", "c4": "4 карты Игроку", "r": "Раздача"}
+GROX_NAMES = {"x": "Ничья", "o": "21 очко", "op": "21 игроку", "g": "Голд (2 туза)", "c4": "4 карты Игроку", "r": "Раздача"}
 GROX_STEP = {1: "", 2: "1️⃣", 3: "2️⃣", 4: "3️⃣", 5: "4️⃣", 6: "5️⃣", 7: "6️⃣",
              8: "7️⃣", 9: "8️⃣", 10: "9️⃣"}   # как в других столбиках
 GROX_STEPS_CHOICES = (3, 5, 7, 10)   # кнопки: сколько игр догоняем
 GROX_MAX = 15        # строк в одном посте-столбике
 grox_last = {}       # chat_id -> последний разобранный номер игры
+grox_done = {}       # chat_id -> set номеров игр, уже учтённых в 21GROX
 
 
 def grox_odds(key):
@@ -1197,19 +1292,39 @@ def grox_steps(key):
     return int(cfg.setdefault("grox_steps", {}).get(key, 5))
 
 
-def grox_stakes(key):
-    """Ставки догона на выбранное число игр.
-    21 очко: 100-200-400-800-1200, дальше +400; остальные: 100-200-300-…"""
-    n = grox_steps(key)
+def _grox_base_stakes(n, key="g"):
+    """Базовый ряд ставок на n шагов (ещё без подгонки под Голд)."""
     m = cfg.get("grox_mult")
     if m:                                   # догон ×1.5 / ×2 / ×2.5 от 100
-        return [int(round(100 * float(m) ** i / 10)) * 10 for i in range(n)]
-    if key == "o":
+        return [max(10, int(round(100 * float(m) ** i / 10)) * 10) for i in range(n)]
+    if key in ("o", "op"):
         out = [100, 200, 400, 800, 1200]
         while len(out) < n:
             out.append(out[-1] + 400)
         return out[:n]
     return [100 * i for i in range(1, n + 1)]
+
+
+def grox_auto_dog():
+    """Догон-автомат: ставки остальных рынков подгоняются под чистыми Голда на последнем шаге."""
+    return bool(cfg.get("grox_auto_dog", True))
+
+
+def grox_stakes(key):
+    """Ставки догона. При «Догон автомат» остальные рынки масштабируются под чистыми Голда."""
+    n = grox_steps(key)
+    base = _grox_base_stakes(n, key)
+    if key == "g" or not grox_auto_dog():
+        return base
+    g_base = _grox_base_stakes(n, "g")
+    g_odds = grox_odds("g")
+    k_odds = grox_odds(key)
+    g_net = g_base[-1] * g_odds - sum(g_base)
+    denom = base[-1] * k_odds - sum(base)
+    if denom <= 1 or g_net <= 0:
+        return base
+    f = g_net / denom
+    return [max(10, int(round(s * f / 10.0)) * 10) for s in base]
 
 
 def grox_enabled(key):
@@ -1228,32 +1343,30 @@ def grox_state(chat_id):
     st.setdefault("stats", {})
     st.setdefault("profit", {})         # плюс/минус по каждому рынку
     st.setdefault("profit_since", time.strftime("%d.%m"))
+    st.setdefault("virt_bank", 0.0)
+    st.setdefault("src_profit", {"diam": 0.0, "five": 0.0, "drought": 0.0, "ten": 0.0})
+    st.setdefault("src_stats", {"diam": [0, 0], "five": [0, 0], "drought": [0, 0], "ten": [0, 0]})     # вирт. «если остановились на первом ✅»
+    st.setdefault("virt_n", 0)
+    st.setdefault("virt_done", [])
+    st.setdefault("virt_full_bank", 0.0)  # вирт. «если бы НЕ останавливались»
+    st.setdefault("virt_full_n", 0)       # сколько теневых линий закрыто
+    st.setdefault("virt_cont", [])       # теневые догоны после реального стопа
     for k, _, _, _ in GROX_LINES:
         st["stats"].setdefault(k, [0, 0])
         st["profit"].setdefault(k, 0.0)
     return st
 
 
-TEN_NEED = 10    # сигнал «Десятка»: N игр подряд без ничьи, раздачи, 21 у Игрока и Голда
-ten_streak = {}  # chat_id -> сколько игр подряд без этих исходов
-
-
-def ten_on():
-    return bool(cfg.get("ten_on", True))
-
-
-def ten_is_clean(text):
-    pts = [int(x) for x in re.findall(r"(\d+)\s*\(", text or "")[:2]]
-    player21 = bool(pts) and pts[0] == 21
-    return not (player21 or any(grox_hit(k, text) for k in ("x", "r", "g")))
-
-
 def grox_hit(key, text):
     """Зашла ли линия в этой игре: x — ничья, o — у кого-то 21, g — два туза."""
     t = text or ""
+    # очки: «19(…» и «21(…» — первые две суммы до скобок
     pts = [int(x) for x in re.findall(r"(\d+)\s*\(", t)[:2]]
+    # теги канала: #O / #O🔵 / #X / #G (после буквы может быть эмодзи)
+    def _tag(letter):
+        return bool(re.search(rf"(?<!\w)#{letter}(?![A-Za-z0-9_])", t, re.I))
     if key == "g":
-        return bool(re.search(r"(?<!\w)#G\b", t))
+        return _tag("G")
     if key == "c4":  # у Игрока ровно 4 карты
         parts = re.findall(r"\(([^)]*)\)", t)[:1]
         return bool(parts) and sum(1 for ch in parts[0] if ch in "♠♣♥❤♦") == 4
@@ -1262,11 +1375,15 @@ def grox_hit(key, text):
         cnt = [sum(1 for ch in p if ch in "♠♣♥❤♦") for p in parts]
         return len(cnt) == 2 and cnt == [2, 2]
     if key == "x":
-        return bool(re.search(r"(?<!\w)#X\b", t)) or (len(pts) == 2 and pts[0] == pts[1])
-    return bool(re.search(r"(?<!\w)#O\b", t)) or 21 in pts
+        return _tag("X") or (len(pts) == 2 and pts[0] == pts[1])
+    if key == "op":
+        # 21 именно у Игрока (первая сумма в посте)
+        return bool(pts) and pts[0] == 21
+    # 21 очко: #O / сумма 21 / золотое очко (#G — два туза = 21)
+    return _tag("O") or _tag("G") or 21 in pts
 
 
-GROX_WHAT = [("o", "21"), ("g", "G"), ("x", "X"), ("r", "R"), ("c4", "4к")]
+GROX_WHAT = [("o", "21"), ("op", "21👤"), ("g", "G"), ("x", "X"), ("r", "R"), ("c4", "4к")]
 
 
 def grox_what(text):
@@ -1394,7 +1511,7 @@ def auto21_early(chat_id, text):
     auto21_flush()
 
 
-GROX_LABEL = {"x": "🤝 Ничья", "o": "🎯 21 очко", "g": "🥇 Голд", "r": "🎴 Раздача", "c4": "🃏 4 карты"}
+GROX_LABEL = {"x": "🤝 Ничья", "o": "🎯 21 очко", "op": "👤 21 игроку", "g": "🥇 Голд", "r": "🎴 Раздача", "c4": "🃏 4 карты"}
 
 
 def grox_text(chat_id, start):
@@ -1404,8 +1521,13 @@ def grox_text(chat_id, start):
     if not rows:
         return None
     sg = lambda v: ("+" if v >= 0 else "−") + money(abs(v))
-    src = "🔟 Десятка" if any(r.get("src") == "ten" for r in rows) else "🃏 Нет масти"
-    lines = ["<b>🎰 21GROX</b>", f"<i>Сигнал: {src}</i>", "", f"<b>▶️ Ставим с игры #{start}</b>"]
+    src = next((r.get("src") for r in rows if r.get("src")), "drought")
+    src_name = {"diam": "♦️ Бубна", "five": "5️⃣ Пятёрка", "drought": "🃏 Нет масти",
+                "ten": "🔟 Десятка"}.get(src, src)
+    lines = ["<b>🎰 21GROX</b>",
+             f"<i>Сигнал: {src_name}</i>",
+             "",
+             f"<b>▶️ Ставим с игры #{start}</b>"]
     for i, r in enumerate(rows):
         tree = "└" if i == len(rows) - 1 else "├"
         name = GROX_LABEL.get(r["key"], r["em"])
@@ -1417,7 +1539,10 @@ def grox_text(chat_id, start):
         elif r["status"] == "❌":
             lines.append(f"{tree} {name} — ❌ {total} игр мимо <b>{sg(r['result'])}</b>")
         elif r["status"] == "➖":
-            lines.append(f"{tree} {name} — ➖ нет итога")
+            if r.get("stop_hit"):
+                lines.append(f"{tree} {name} — 🛑 стоп (другое зашло) <b>{sg(r.get('result', 0))}</b>")
+            else:
+                lines.append(f"{tree} {name} — ➖ нет итога")
         else:
             lines.append(f"{tree} {name} — ⏳ ставка <b>{money(r['stakes'][r['n']])}</b> "
                          f"на #{start + r['n']} ({r['n'] + 1}/{total})")
@@ -1425,7 +1550,42 @@ def grox_text(chat_id, start):
     if all(r["status"] != "⏳" for r in rows):
         tot = sum(r.get("result", 0) for r in rows)
         lines.append(f"🏁 Итог сигнала: <b>{sg(tot)}</b>")
+    # вирт. по этому сигналу (стоп на первом ✅)
+    vpl = next((r.get("virt_stop_pl") for r in rows if r.get("virt_stop_pl") is not None), None)
+    if vpl is not None:
+        mode = grox_stop_mode()
+        if mode == "virt":
+            lines.append(f"📐 Вирт. «если бы стоп»: <b>{sg(vpl)}</b>")
+        elif mode == "real":
+            lines.append(f"📐 Вирт. «стоп на ✅» (фикс.): <b>{sg(vpl)}</b>")
+    # тени «без стопа» по линиям этого сигнала ещё в работе / уже закрыты
+    shadows = [v for v in (st.get("virt_cont") or []) if v.get("start") == start]
+    if shadows:
+        lines.append(f"📐 Вирт. «без стопа»: ещё считает {len(shadows)} лин. …")
     lines.append(f"💰 Всего: <b>{sg(st['bank'])}</b>")
+    # рейтинг по типам сигналов
+    sp = st.get("src_profit") or {}
+    ss = st.get("src_stats") or {}
+    rank = []
+    for sk, lab in (("diam", "♦️ Бубна"), ("five", "5️⃣ Пятёрка"), ("drought", "🃏 Нет масти"),
+                    ("ten", "🔟 Десятка")):
+        pr = float(sp.get(sk, 0) or 0)
+        w, l = (ss.get(sk) or [0, 0])[:2]
+        if pr or w or l:
+            rank.append((pr, f"{lab}: {int(w)}✅/{int(l)}❌ · <b>{sg(pr)}</b>"))
+    if rank:
+        rank.sort(key=lambda x: -x[0])
+        lines.append("🏆 Рейтинг сигналов:")
+        for i, (_, line) in enumerate(rank, 1):
+            lines.append(f"{i}. {line}")
+
+    vb, vn = st.get("virt_bank", 0), st.get("virt_n", 0)
+    vf, vfn = st.get("virt_full_bank", 0), st.get("virt_full_n", 0)
+    if vn:
+        lines.append(f"📐 Σ вирт. стоп ({vn}): <b>{sg(vb)}</b>")
+    if vfn or st.get("virt_cont"):
+        lines.append(f"📐 Σ вирт. без стопа ({vfn} лин.): <b>{sg(vf)}</b>"
+                     + (f" · в тени {len(st.get('virt_cont') or [])}" if st.get("virt_cont") else ""))
     # по рынкам — только включённые (выключенные не ставятся, их счёт не нужен)
     on = [k for k, _, _, _ in GROX_LINES if grox_enabled(k)]
     if on:
@@ -1470,6 +1630,24 @@ def grox_cleanup(chat_id):
     st["msgs"] = {k: v for k, v in st.get("msgs", {}).items() if int(k) in open_starts}
 
 
+def grox_add_src_result(st, row):
+    """Плюс/минус строки в рейтинг по типу сигнала (бубна / пять / масти)."""
+    src = row.get("src") or "drought"
+    if src not in ("diam", "five", "drought", "ten"):
+        src = "drought"
+    sp = st.setdefault("src_profit", {"diam": 0.0, "five": 0.0, "drought": 0.0, "ten": 0.0})
+    ss = st.setdefault("src_stats", {"diam": [0, 0], "five": [0, 0], "drought": [0, 0], "ten": [0, 0]})
+    res = float(row.get("result", 0) or 0)
+    sp[src] = round(float(sp.get(src, 0)) + res, 2)
+    if row.get("status") == "✅":
+        ss.setdefault(src, [0, 0])
+        ss[src][0] = int(ss[src][0]) + 1
+    elif row.get("status") == "❌":
+        ss.setdefault(src, [0, 0])
+        ss[src][1] = int(ss[src][1]) + 1
+    # 🛑 stop_hit — только в profit, без ok/fail
+
+
 def process_grox(chat_id, text):
     """Вызывается на каждый законченный пост канала 21.
     Возвращает [(номер игры сигнала, новый ли пост), ...]."""
@@ -1480,12 +1658,58 @@ def process_grox(chat_id, text):
     if not g:
         return []
     last = grox_last.get(chat_id)
-    if last is not None and last - 50 < g <= last:
-        return []                # повторная правка того же/старого поста
-    grox_last[chat_id] = g
+    done = grox_done.setdefault(chat_id, set())
+    # уже учли эту игру (повторная правка того же итога) — не дублируем
+    if g in done:
+        return []
+    # нумерация прыгнула назад сильно — новый цикл
+    # новая катушка: номер резко упал (например 1200 → 1)
+    reset = last is not None and (g < last - 50 or (last > 20 and g < 5 and g < last))
+    if reset:
+        done.clear()
+        print(f"21GROX: новая нумерация {last} → #{g}, сброс done")
+    # игры могут закрываться не по порядку (наложение правок) — всё равно учитываем
+    done.add(g)
+    if len(done) > 200:
+        # оставляем только свежие номера
+        keep = {x for x in done if x >= g - 80}
+        done.clear()
+        done.update(keep)
+    # после сброса нумерации (#1) last обязан стать новым номером, иначе каждый пост = reset
+    if last is None or g > last or reset:
+        grox_last[chat_id] = g
     st = grox_state(chat_id)
     changed = {}
-    reset = last is not None and g < last - 50           # нумерация началась заново
+    # Теневые догоны: «если бы не останавливались» после реального стопа
+    if st.get("virt_cont"):
+        still = []
+        for vr in st["virt_cont"]:
+            n = g - vr["start"] + 1
+            if n < 1:
+                still.append(vr)
+                continue
+            closed = False
+            if reset or n < -50 or n > len(vr["stakes"]):
+                spent = sum(vr["stakes"][:len(vr["stakes"])])
+                st["virt_full_bank"] = round(st.get("virt_full_bank", 0.0) - spent, 2)
+                st["virt_full_n"] = int(st.get("virt_full_n", 0)) + 1
+                closed = True
+            else:
+                spent = sum(vr["stakes"][:n])
+                if grox_hit(vr["key"], text):
+                    res = round(vr["stakes"][n - 1] * vr["odds"] - spent, 2)
+                    st["virt_full_bank"] = round(st.get("virt_full_bank", 0.0) + res, 2)
+                    st["virt_full_n"] = int(st.get("virt_full_n", 0)) + 1
+                    closed = True
+                elif n >= len(vr["stakes"]):
+                    st["virt_full_bank"] = round(st.get("virt_full_bank", 0.0) - spent, 2)
+                    st["virt_full_n"] = int(st.get("virt_full_n", 0)) + 1
+                    closed = True
+                else:
+                    still.append(vr)
+            if closed:
+                changed[vr["start"]] = False   # обновить пост сигнала с новым вирт. итогом
+        st["virt_cont"] = still
     for r in st["rows"]:
         if r["status"] != "⏳":
             continue
@@ -1513,6 +1737,7 @@ def process_grox(chat_id, text):
             st["stats"][r["key"]][1] += 1
         if r["status"] in ("✅", "❌"):
             st["bank"] = round(st["bank"] + r["result"], 2)
+            grox_add_src_result(st, r)
             st["profit"][r["key"]] = round(st["profit"].get(r["key"], 0.0) + r["result"], 2)
         if r["key"] in AUTO21_OUT and r.get("sid") and (r["sid"], g) in _auto21_early:
             if r["status"] == "✅":
@@ -1523,37 +1748,115 @@ def process_grox(chat_id, text):
                 auto21_add(auto21_line("BET", r, g + 1, step=n + 1, max=len(r["stakes"]),
                                        kf=format(r["odds"], "g")))
         changed[r["start"]] = False
+    # Стоп при заходе: real — гасим догоны; virt — только считаем, догоны идут дальше
+    mode = grox_stop_mode()
+    # стоп только ничья/голд/4 карты/раздача — заход 21 (o) догоны не гасит
+    hit_starts = {r["start"] for r in st["rows"]
+                  if r.get("status") == "✅" and r.get("game") == g
+                  and r.get("key") in GROX_STOP_KEYS}
+    if mode == "real" and hit_starts:
+        for r in st["rows"]:
+            if r["status"] != "⏳" or r["start"] not in hit_starts:
+                continue
+            n = max(1, g - r["start"] + 1)
+            spent = sum(r["stakes"][:min(n, len(r["stakes"]))])
+            r["status"] = "➖"
+            r["result"] = -float(spent)
+            r["stop_hit"] = True
+            st["bank"] = round(st["bank"] + r["result"], 2)
+            grox_add_src_result(st, r)
+            st["profit"][r["key"]] = round(st["profit"].get(r["key"], 0.0) + r["result"], 2)
+            # тень: продолжаем виртуально, как будто догон не останавливали
+            st.setdefault("virt_cont", []).append({
+                "start": r["start"], "key": r["key"], "em": r.get("em"),
+                "stakes": list(r["stakes"]), "odds": r["odds"],
+            })
+            if r["key"] in AUTO21_OUT and r.get("sid"):
+                auto21_add(f"AUTO21 STOP sig={r['sid']}")
+            changed[r["start"]] = False
+    if mode in ("real", "virt") and hit_starts:
+        # виртуальный итог «остановились на первом заходе» — один раз на сигнал
+        done = set(st.get("virt_done") or [])
+        for start in hit_starts:
+            if start in done:
+                continue
+            batch = [r for r in st["rows"] if r["start"] == start]
+            virt = 0.0
+            for r in batch:
+                if r.get("status") == "✅" and r.get("game") == g:
+                    virt += float(r.get("result", 0))
+                elif r.get("status") == "⏳" or r.get("stop_hit"):
+                    n = max(1, g - r["start"] + 1)
+                    spent = sum(r["stakes"][:min(n, len(r["stakes"]))])
+                    virt -= float(spent)
+                elif r.get("status") in ("✅", "❌", "➖") and "result" in r:
+                    virt += float(r["result"])
+            st["virt_bank"] = round(st.get("virt_bank", 0.0) + virt, 2)
+            st["virt_n"] = int(st.get("virt_n", 0)) + 1
+            done.add(start)
+            # помечаем для отображения в посте сигнала
+            for r in batch:
+                r["virt_stop"] = True
+                r["virt_at"] = g
+                r["virt_stop_pl"] = virt
+            changed[start] = changed.get(start, False)
+        st["virt_done"] = list(done)[-50:]
     st["rows"] = [r for r in st["rows"] if r.get("status") != "drop"]
     # по каждому событию — только одна цепочка догона: пока по нему идёт догон
     # прошлого сигнала, новый сигнал это событие не берёт (не ставим 2-3 раза подряд)
-    busy = {r["key"] for r in st["rows"] if r["status"] == "⏳"}
-    keys = [(k, em, stk) for k, em, stk, _ in GROX_LINES if grox_enabled(k) and k not in busy]
     if ten_is_clean(text) and not reset:
         ten_streak[chat_id] = int(ten_streak.get(chat_id, 0)) + 1
     else:
         ten_streak[chat_id] = 0
+    if grox_parallel():
+        busy = set()
+    else:
+        busy = {r["key"] for r in st["rows"] if r["status"] == "⏳"}
+    keys = [(k, em, stk) for k, em, stk, _ in GROX_LINES if grox_enabled(k) and k not in busy]
     if keys:
-        d, total = suit_drought(chat_id)
-        need = grox_need()
-        fresh = [e for e, v in d.items() if v == need] if total >= need else []
-        src = "drought"
+        # Три независимых сигнала — можно включать любой набор
+        signals = []  # (start_game, suit, src)
+        if diam_on() and diamond_pattern(text):
+            signals.append((g + int(cfg.get("grox_lead", GROX_LEAD)), "♦️", "diam"))
+        if five_on():
+            if five_is_clean(text):
+                five_streak[chat_id] = int(five_streak.get(chat_id, 0)) + 1
+            else:
+                five_streak[chat_id] = 0
+            if int(five_streak.get(chat_id, 0)) >= FIVE_NEED:
+                signals.append((g + int(cfg.get("grox_lead", GROX_LEAD)), "5️⃣", "five"))
+                five_streak[chat_id] = 0
         if ten_on() and int(ten_streak.get(chat_id, 0)) >= TEN_NEED:
-            fresh, src = ["🔟"], "ten"            # «Десятка» — сигнал без масти
-        if fresh and not any(r["start"] == g + 1 for r in st["rows"]):
-            if src == "ten":
-                ten_streak[chat_id] = 0
-            suit = random.choice(fresh)
+            signals.append((g + int(cfg.get("grox_lead", GROX_LEAD)), "🔟", "ten"))
+            ten_streak[chat_id] = 0
+        if drought_on():
+            d, total = suit_drought(chat_id)
+            need = grox_need()
+            fresh = [e for e, v in d.items() if v == need] if total >= need else []
+            if fresh:
+                signals.append((g + int(cfg.get("grox_lead", GROX_LEAD)), random.choice(fresh), "drought"))
+        # дублировать: новый сигнал даже при открытом старом; иначе ждём
+        started = set()
+        for start_game, suit, src in signals:
+            if start_game in started:
+                continue
+            if any(r["start"] == start_game for r in st["rows"]):
+                continue
+            if not grox_parallel() and any(r["status"] == "⏳" for r in st["rows"]):
+                continue
+            started.add(start_game)
             for k, em, stk in keys:
                 stakes = grox_stakes(k) if "grox_stakes" in globals() else list(stk)
-                row = {"start": g + 1, "suit": suit, "key": k, "em": em,
+                row = {"start": start_game, "suit": suit, "key": k, "em": em,
                        "stakes": stakes, "odds": grox_odds(k),
                        "n": 0, "status": "⏳",
-                       "sid": time.strftime("%d%m") + f"-{g + 1}{k}", "src": src}
+                       "sid": time.strftime("%d%m") + f"-{start_game}{k}",
+                       "src": src}
                 st["rows"].append(row)
                 if k in AUTO21_OUT:
-                    auto21_add(auto21_line("BET", row, g + 1, step=1, max=len(stakes),
+                    auto21_add(auto21_line("BET", row, start_game, step=1, max=len(stakes),
                                            kf=format(row["odds"], "g")))
-            changed[g + 1] = True
+            changed[start_game] = True
     if changed:
         save_settings()
     auto21_flush()
@@ -1567,16 +1870,41 @@ def grox_panel_text():
              f" последнее {st['last_ok']}, ошибок {st['errors']}"
              + (f" — {html.escape(st['last_err'])}" if st["last_err"] else ""),
              f"Догон ставок: {('×' + format(float(cfg['grox_mult']), 'g')) if cfg.get('grox_mult') else 'стандарт'}",
+             f"⚖️ Догон автомат: {onoff(grox_auto_dog())} "
+             f"(ставки рынков → чистыми как у Голда на последнем шаге)",
+             f"5️⃣ Сигнал «Пять»: {onoff(five_on())} "
+             f"({FIVE_NEED} игр подряд без ничьи/21/голда/раздачи)",
              f"🔟 Сигнал «Десятка»: {onoff(ten_on())} ({TEN_NEED} игр подряд без ничьи / раздачи /"
-             f" 21 у Игрока / Голда; сейчас {max(ten_streak.values() or [0])})",
-             f"Сигнал: масти нет у Игрока {grox_need()} игр подряд → линии догоном:"]
+             f" 21 у Игрока / голда; сейчас {max(ten_streak.values() or [0])})",
+             f"♦️ Стратегия бубна: {onoff(diam_on())} "
+             f"(последняя/первая ♦️ у Игрока + первая/последняя ♦️ у Дилера → сигнал через {DIAM_LEAD} игр)",
+             f"🛑 Стоп при заходе: <b>{grox_stop_label()}</b> (общий 21 не стопит, 21 у Игрока — стопит)",
+             "   • РЕАЛЬНЫЙ — гасим догоны; виртуально считаем «если бы не стоп»",
+             "   • ВИРТУАЛЬНЫЙ — догоны идут; виртуально считаем «если бы стоп»",
+             f"⏭ Старт ставок: через {int(cfg.get('grox_lead', GROX_LEAD))} игр (#{100}→#{102})",
+             f"📚 Дублировать сигналы: {onoff(grox_parallel())}",
+             f"Сигналы можно включать вместе (1 / 2 / 3):",
+             f"  • нет масти {grox_need()} игр: {onoff(drought_on())}",
+             f"  • бубна: {onoff(diam_on())}",
+             f"  • пять: {onoff(five_on())}",
+             f"  • десятка: {onoff(ten_on())}"]
     for k, em, stk, _ in GROX_LINES:
         lines.append(f"{'✅' if grox_enabled(k) else '⛔'} {em} {GROX_NAMES[k]}: "
                      f"{grox_steps(k)} игр ({'-'.join(str(x) for x in grox_stakes(k))}), КФ {grox_odds(k):g}")
     for cid, title in cfg["groups"].items():
         st = grox_state(cid) if cid in cfg.get("grox", {}) else None
         b = (st or {}).get("bank", 0)
+        vb = (st or {}).get("virt_bank", 0)
+        vn = (st or {}).get("virt_n", 0)
+        vf = (st or {}).get("virt_full_bank", 0)
+        vfn = (st or {}).get("virt_full_n", 0)
+        vc = len((st or {}).get("virt_cont") or [])
         lines.append(f"\n<b>{title}</b>: всего {'+' if b >= 0 else ''}{money(b)}")
+        if vn:
+            lines.append(f"📐 Вирт. «стоп на ✅» ({vn} сигн.): {'+' if vb >= 0 else ''}{money(vb)}")
+        if vfn or vc:
+            lines.append(f"📐 Вирт. «без стопа» (линии): {'+' if vf >= 0 else ''}{money(vf)}"
+                         + (f", в тени ещё {vc}" if vc else f", закрыто {vfn}"))
         wait = [r for r in (st or {}).get("rows", []) if r.get("status") == "⏳"]
         if wait:
             lines.append("Сейчас идёт сигнал с игры #" + str(wait[0]["start"]) + ": "
@@ -1594,7 +1922,13 @@ def grox_panel_text():
 
 def grox_panel_kb():
     kb = types.InlineKeyboardMarkup(row_width=3)
+    kb.add(btn(f"🃏 Нет масти: {onoff(drought_on())}", "drought:toggle"))
+    kb.add(btn(f"5️⃣ Сигнал «Пять»: {onoff(five_on())}", "five:toggle"))
     kb.add(btn(f"🔟 Сигнал «Десятка»: {onoff(ten_on())}", "ten:toggle"))
+    kb.add(btn(f"♦️ Стратегия бубна: {onoff(diam_on())}", "diam:toggle"))
+    kb.add(btn(f"📚 Дублировать сигналы: {onoff(grox_parallel())}", "grox:parallel"))
+    kb.add(btn(f"🛑 Стоп при заходе: {grox_stop_label()} (сменить)", "grox:stophit"))
+    kb.add(btn("♻️ Сбросить статистику 21GROX", "grox:statsreset"))
     kb.add(btn("Сколько игр нет масти 👇", "noop"))
     kb.row(*[btn(("✅ " if grox_need() == n else "") + f"{n} игр", f"gxn:{n}") for n in (2, 3, 4, 5)])
     tg = [btn(("✅ " if grox_enabled(k) else "⛔ ") + GROX_NAMES[k].split(" (")[0], f"gxt:{k}")
@@ -1606,13 +1940,14 @@ def grox_panel_kb():
         kb.row(btn(em, "noop"), *[btn(("✅" if grox_steps(k) == n else "") + str(n), f"gxs:{k}:{n}")
                                  for n in GROX_STEPS_CHOICES])
     for k, em, _, _ in GROX_LINES:
-        step = 1.0 if k == "g" else 0.05 if k == "o" else 0.5
+        step = 1.0 if k == "g" else 0.05 if k in ("o", "op") else 0.5
         kb.add(btn("➖", f"gxo:{k}:-{step}"), btn(f"КФ {GROX_NAMES[k]} {grox_odds(k):g}", "noop"),
                btn("➕", f"gxo:{k}:{step}"))
     gm = cfg.get("grox_mult")
     kb.add(btn("Догон ставок 👇", "noop"))
     kb.row(*[btn(("✅ " if (gm or 0) == v else "") + lab, f"gxm:{v}")
              for v, lab in ((0, "стандарт"), (1.5, "×1.5"), (2, "×2"), (2.5, "×2.5"))])
+    kb.add(btn(f"⚖️ Догон автомат: {onoff(grox_auto_dog())}", "grox:autodog"))
     kb.add(btn("♻️ Сбросить банк", "gxb:reset"), btn("✏️ Ввести банк", "gxb:set"), row_width=2)
     kb.add(back())
     return kb
@@ -2082,6 +2417,8 @@ def main_text():
         f"Прогнозы масти: {onoff(cfg.get('forecasts', True))}\n"
         f"Шутки: {int(cfg.get('joke_chance', 0) * 100)}% разговоров\n"
         f"Стикеры: {int(cfg.get('sticker_chance', 0) * 100)}%, паков: {len(cfg['sticker_sets'])}\n"
+        f"5️⃣ «Пять»: {onoff(five_on())}\n"        f"🔟 «Десятка»: {onoff(ten_on())}\n"        f"♦️ Стратегия бубна: {onoff(diam_on())}\n"
+        f"🛑 Стоп при заходе: {grox_stop_label()}\n"
         f"Активные: {', '.join(pname(p) for p in active_personas()) or 'никого'}\n"
         f"Групп: {len(cfg['groups'])}, сейчас говорят в: {busy}"
     )
@@ -2105,7 +2442,14 @@ def main_kb():
     kb.add(btn("👤 Персонажи", "menu:personas"), btn("🗂 Темы групп", "menu:groups"),
            row_width=2)
     kb.add(btn("🧷 Стикерпаки", "menu:stickers"), btn("💰 Финансы", "menu:fin"), row_width=2)
-    kb.add(btn("🥇 21GROX (всегда вкл)", "menu:grox"))
+    kb.add(btn("🥇 21GROX — настройки", "menu:grox"))
+    kb.add(btn(f"🃏 Нет масти: {onoff(drought_on())}", "drought:toggle"),
+           btn(f"5️⃣ Пять: {onoff(five_on())}", "five:toggle"),
+           btn(f"🔟 Десятка: {onoff(ten_on())}", "ten:toggle"),
+           btn(f"♦️ Бубна: {onoff(diam_on())}", "diam:toggle"),
+           btn(f"📚 Дубль: {onoff(grox_parallel())}", "grox:parallel"),
+           btn(f"🛑 Стоп: {grox_stop_label()}", "grox:stophit"),
+           row_width=2)
     kb.add(btn("🎬 Разговор сейчас", "now"), btn("📊 Статистика", "stats"),
            row_width=2)
     kb.add(btn("🔄 Обновить", "menu:main"))
@@ -2472,6 +2816,53 @@ def on_button(c):
         screen = "grox"
     elif d == "ten:toggle":
         cfg["ten_on"] = not ten_on()
+        note = "Сигнал «Десятка» " + ("ВКЛ" if cfg["ten_on"] else "ВЫКЛ")
+        screen = "main"
+    elif d == "five:toggle":
+        cfg["five_on"] = not cfg.get("five_on", False)
+        note = "Сигнал «Пять» " + ("ВКЛ" if cfg["five_on"] else "ВЫКЛ")
+        screen = "main"
+    elif d == "diam:toggle":
+        cfg["diam_on"] = not cfg.get("diam_on", False)
+        note = "Стратегия бубна " + ("ВКЛ" if cfg["diam_on"] else "ВЫКЛ")
+        screen = "main"
+    elif d == "drought:toggle":
+        cfg["drought_on"] = not cfg.get("drought_on", True)
+        note = "Сигнал «нет масти» " + ("ВКЛ" if cfg.get("drought_on", True) else "ВЫКЛ")
+        screen = "main"
+    elif d == "grox:parallel":
+        cfg["grox_parallel"] = not cfg.get("grox_parallel", False)
+        note = ("Дублировать сигналы ВКЛ — новый не ждёт конца старого"
+                if cfg["grox_parallel"] else
+                "Дублировать ВЫКЛ — ждём закрытия текущего сигнала")
+        screen = "main"
+    elif d == "grox:stophit":
+        order = ["off", "real", "virt"]
+        cur = grox_stop_mode()
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "off"
+        cfg["grox_stop_mode"] = nxt
+        cfg["grox_stop_hit"] = nxt == "real"   # совместимость
+        note = "Стоп при заходе: " + grox_stop_label()
+        screen = "main"
+    elif d == "grox:statsreset":
+        for st in cfg.setdefault("grox", {}).values():
+            if not isinstance(st, dict):
+                continue
+            st["stats"] = {}
+            st["profit"] = {}
+            st["profit_since"] = time.strftime("%d.%m")
+            st["virt_bank"] = 0.0
+            st["src_profit"] = {"diam": 0.0, "five": 0.0, "drought": 0.0, "ten": 0.0}
+            st["src_stats"] = {"diam": [0, 0], "five": [0, 0], "drought": [0, 0], "ten": [0, 0]}
+            st["virt_n"] = 0
+            st["virt_done"] = []
+            st["virt_full_bank"] = 0.0
+            st["virt_full_n"] = 0
+            st["virt_cont"] = []
+            for k, _, _, _ in GROX_LINES:
+                st["stats"][k] = [0, 0]
+                st["profit"][k] = 0.0
+        note = "Статистика 21GROX сброшена (банк не трогали)"
         screen = "grox"
     elif d.startswith("gxn:"):
         cfg["grox_n"] = int(d[4:])
@@ -2483,6 +2874,10 @@ def on_button(c):
     elif d.startswith("gxm:"):
         v = float(d[4:])
         cfg["grox_mult"] = v if v else None
+        screen = "grox"
+    elif d == "grox:autodog":
+        cfg["grox_auto_dog"] = not cfg.get("grox_auto_dog", True)
+        note = "Догон автомат " + ("ВКЛ" if cfg["grox_auto_dog"] else "ВЫКЛ")
         screen = "grox"
     elif d == "gxb:reset":
         for st in cfg.setdefault("grox", {}).values():
