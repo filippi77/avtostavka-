@@ -384,6 +384,20 @@ class DB:
             )
         await self.conn.commit()
 
+    async def game_interval(self, wrap: int, samples: int = 12) -> int | None:
+        """Медианный интервал между началами соседних игр (по первым постам канала), секунд.
+        Пропуски из-за остановок бота (больше 5 минут) и дребезг (меньше 5 секунд) не учитываются."""
+        cur = await self.conn.execute("SELECT number, seen_at FROM games ORDER BY seen_at DESC LIMIT ?", (samples + 1,))
+        rows = await cur.fetchall()
+        gaps = []
+        for newer, older in zip(rows, rows[1:]):
+            if (newer["number"] - older["number"]) % wrap == 1 and 5 <= newer["seen_at"] - older["seen_at"] <= 300:
+                gaps.append(newer["seen_at"] - older["seen_at"])
+        if len(gaps) < 3:
+            return None
+        gaps.sort()
+        return gaps[len(gaps) // 2]
+
     async def game_seen_since(self, number: int, since: int) -> bool:
         cur = await self.conn.execute(
             "SELECT 1 FROM games WHERE number = ? AND seen_at >= ?", (number, since)

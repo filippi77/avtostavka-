@@ -43,6 +43,10 @@ class Config:
     # ставки на следующую игру закрываются через столько секунд после поста
     # предыдущей. 0 — закрывать только по посту самой игры.
     bet_window_seconds: int = int(os.getenv("BET_WINDOW_SECONDS", "0"))
+    # Режим закрытия: "auto" — по среднему интервалу между играми минус запас до старта следующей,
+    # число — секунд после поста предыдущей игры, 0 — только по посту самой игры. Меняется в /admin.
+    bet_window_default: str = os.getenv("BET_WINDOW", "auto")
+    bet_reserve_seconds: int = int(os.getenv("BET_RESERVE_SECONDS", "20"))
     # Сброс балансов из /admin: сколько фишек получает каждый игрок.
     reset_amount: int = int(os.getenv("RESET_AMOUNT", "5000"))
 

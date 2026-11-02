@@ -18,7 +18,8 @@ from .db import DB
 log = logging.getLogger(__name__)
 
 TOURNAMENT_DAYS = (1, 3, 7)
-WINDOW_OPTIONS = (20, 30, 45, 60, 0)  # секунд после поста предыдущей игры; 0 — выкл
+WINDOW_OPTIONS = ("auto", "20", "30", "45", "60", "0")  # авто / секунд после поста предыдущей игры / выкл
+RESERVE_OPTIONS = (10, 20, 30, 40)  # запас до старта следующей игры в авто-режиме, секунд
 GIFT_AMOUNTS = {"main": (500, 1000, 5000), "tour": (200, 500, 1000)}
 WALLET_NAMES = {"main": "обычных", "tour": "турнирных"}
 
@@ -118,13 +119,25 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         InlineKeyboardButton(text="📢 Анонс магазина", callback_data="adm:shopnews"),
     ])
     if cfg.game == "baccarat":
+        mode = await betting.bet_window_mode(cfg, db)
         window = await betting.bet_window(cfg, db)
-        lines.append(f"Закрытие ставок: {f'через {window} с после поста предыдущей игры' if window else 'по посту самой игры'}")
+        reserve = await betting.bet_reserve(cfg, db)
+        interval = await db.game_interval(cfg.game_number_wrap)
+        if mode == "auto":
+            basis = f"игры идут раз в {interval} с, запас {reserve} с" if interval else "мало данных, пока фиксированно"
+            lines.append(f"Закрытие ставок: авто — через {window} с после старта игры ({basis})")
+        else:
+            lines.append(f"Закрытие ставок: {f'через {window} с после поста предыдущей игры' if window else 'по посту самой игры'}")
         rows.append([
-            InlineKeyboardButton(text=("✅ " if window == w else "") + (f"{w} с" if w else "Выкл"),
+            InlineKeyboardButton(text=("✅ " if mode == w else "") + {"auto": "Авто", "0": "Выкл"}.get(w, f"{w} с"),
                                  callback_data=f"adm:win:{w}")
             for w in WINDOW_OPTIONS
         ])
+        if mode == "auto":
+            rows.append([
+                InlineKeyboardButton(text=("✅ " if reserve == r else "") + f"запас {r} с", callback_data=f"adm:res:{r}")
+                for r in RESERVE_OPTIONS
+            ])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text=f"♻️ Сбросить балансы ({cfg.reset_amount} всем)", callback_data="adm:reset")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
@@ -319,8 +332,15 @@ def build_router(cfg: Config, db: DB) -> Router:
                     note = "Анонс отправлен."
         elif action == "win":
             await db.set_state("bet_window", parts[2])
-            w = int(parts[2])
-            note = f"Ставки закрываются через {w} с после поста предыдущей игры." if w else "Закрытие по таймеру выключено."
+            if parts[2] == "auto":
+                note = "Авто: бот сам считает, как часто идут игры, и закрывает ставки до старта следующей."
+            elif parts[2] == "0":
+                note = "Закрытие по таймеру выключено."
+            else:
+                note = f"Ставки закрываются через {parts[2]} с после поста предыдущей игры."
+        elif action == "res":
+            await db.set_state("bet_reserve", parts[2])
+            note = f"Запас до старта следующей игры: {parts[2]} с."
         elif action == "reset":
             text, kb = await reset_confirm(cfg, db)
             await query.answer()

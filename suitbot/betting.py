@@ -13,10 +13,28 @@ def side_name(code: str) -> str:
     return t(f"side_{code}")
 
 
+async def bet_reserve(cfg: Config, db: DB) -> int:
+    return int(await db.get_state("bet_reserve", str(cfg.bet_reserve_seconds)))
+
+
+async def bet_window_mode(cfg: Config, db: DB) -> str:
+    """"auto", число секунд или "0" — режим закрытия ставок (меняется в /admin)."""
+    return await db.get_state("bet_window", cfg.bet_window_default or str(cfg.bet_window_seconds))
+
+
 async def bet_window(cfg: Config, db: DB) -> int:
     """Через сколько секунд после поста предыдущей игры закрывается приём ставок на следующую.
-    Меняется в /admin, по умолчанию — BET_WINDOW_SECONDS; 0 — только по посту самой игры."""
-    return int(await db.get_state("bet_window", str(cfg.bet_window_seconds)))
+    Ставки на игру N+1 идут, пока идёт игра N, и закрываются до старта N+1.
+    В авто-режиме это средний интервал между играми минус запас; 0 — только по посту самой игры."""
+    if cfg.game != "baccarat":
+        return 0
+    mode = await bet_window_mode(cfg, db)
+    if mode == "auto":
+        interval = await db.game_interval(cfg.game_number_wrap)
+        if interval is None:  # пока мало данных — безопасное фиксированное значение
+            return cfg.bet_window_seconds or 30
+        return max(10, interval - await bet_reserve(cfg, db))
+    return int(mode)
 
 
 class BetError(Exception):
