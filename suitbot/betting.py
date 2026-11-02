@@ -13,6 +13,12 @@ def side_name(code: str) -> str:
     return t(f"side_{code}")
 
 
+async def bet_window(cfg: Config, db: DB) -> int:
+    """Через сколько секунд после поста предыдущей игры закрывается приём ставок на следующую.
+    Меняется в /admin, по умолчанию — BET_WINDOW_SECONDS; 0 — только по посту самой игры."""
+    return int(await db.get_state("bet_window", str(cfg.bet_window_seconds)))
+
+
 class BetError(Exception):
     """Ставка не принята; текст исключения можно показать игроку."""
 
@@ -70,9 +76,10 @@ async def place(
         raise BetError(t("bet_range", last=last, first=last + 1, to=last + cfg.max_games_ahead))
     if await db.game_seen_since(game, int(time.time()) - cfg.bet_ttl_hours * 3600):
         raise BetError(t("bet_started", game=game))
-    if cfg.bet_window_seconds and ahead == 1:
+    window = await bet_window(cfg, db)
+    if window and ahead == 1:
         seen = await db.game_seen_at(last)
-        if seen and time.time() > seen + cfg.bet_window_seconds:
+        if seen and time.time() > seen + window:
             raise BetError(t("bet_window", game=game))
 
     if tournament_id is not None:

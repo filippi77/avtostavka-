@@ -464,6 +464,12 @@ TEXTS: dict[str, tuple[str, str]] = {
                     "4. Fishkalarni 🛒 do'konda sarflang: ism yonidagi belgi, chatdagi unvon, VIP.\n"),
     "help_shop": ("🛒 Магазин в кабинете: значок у имени — {badge}, звание в чате — {title}, VIP — {vip} фишек.\n",
                   "🛒 Kabinetdagi do'kon: ism yonidagi belgi — {badge}, chatdagi unvon — {title}, VIP — {vip} fishka.\n"),
+    "reset_news": ("♻️ <b>Новый старт!</b> Все балансы сброшены, каждому выдано {amount} фишек.{extra}",
+                   "♻️ <b>Yangi boshlanish!</b> Barcha balanslar nolga tushirildi, har kimga {amount} fishka berildi.{extra}"),
+    "reset_window": ("\nЧтобы игра была честной, ставки теперь закрываются раньше: через {window} с после "
+                     "предыдущей игры — ставьте заранее!",
+                     "\nO'yin adolatli bo'lishi uchun stavkalar endi ertaroq yopiladi: oldingi o'yindan {window} soniya "
+                     "o'tgach — oldindan tiking!"),
     "shop_title_news": ("🏷 Новое звание в чате: {name} — «{title}» на {days} дн.! Магазин — в личке с ботом.",
                         "🏷 {name} yangi «{title}» unvonini {days} kunga oldi! Do'kon — bot bilan shaxsiy chatda."),
 

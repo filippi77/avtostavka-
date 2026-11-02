@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 import aiosqlite
@@ -867,3 +868,33 @@ class DB:
         )
         row = await cur.fetchone()
         return row["n"], row["chips"]
+
+    # --- сброс балансов -----------------------------------------------------
+
+    async def backup(self) -> str | None:
+        """Копия базы рядом с файлом: suitbot.sqlite3.bak-ГГГГММДД-ЧЧММСС. None — база в памяти."""
+        if self.path == ":memory:":
+            return None
+        stem = f"{self.path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+        dest, n = stem, 1
+        while os.path.exists(dest):  # две копии в одну секунду (двойное нажатие) не должны затирать друг друга
+            n += 1
+            dest = f"{stem}-{n}"
+        await self.conn.commit()
+        await self.conn.execute("VACUUM INTO ?", (dest,))
+        return dest
+
+    async def reset_balances(self, amount: int) -> tuple[int, int, int]:
+        """Всем игрокам обычный баланс = amount. Открытые ставки и дуэли отменяются без выплат
+        (их ставки уже списаны с прежних балансов). Турнирные фишки, магазин и платежи не трогаем.
+        Возвращает (игроков, отменено ставок, отменено дуэлей)."""
+        cur = await self.conn.execute("UPDATE bets SET status = 'voided', payout = 0 WHERE status = 'open'")
+        bets = cur.rowcount
+        cur = await self.conn.execute(
+            "UPDATE duels SET status = 'expired' WHERE status IN ('pending', 'active')"
+        )
+        duels = cur.rowcount
+        cur = await self.conn.execute("UPDATE users SET balance = ?", (amount,))
+        users = cur.rowcount
+        await self.conn.commit()
+        return users, bets, duels

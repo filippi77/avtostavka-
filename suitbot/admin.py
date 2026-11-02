@@ -9,7 +9,7 @@ from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from . import activity, cards, duels, i18n, quick, shop
+from . import activity, betting, cards, duels, i18n, quick, shop
 from .i18n import t
 from . import tournament as tour
 from .config import Config
@@ -18,6 +18,7 @@ from .db import DB
 log = logging.getLogger(__name__)
 
 TOURNAMENT_DAYS = (1, 3, 7)
+WINDOW_OPTIONS = (20, 30, 45, 60, 0)  # секунд после поста предыдущей игры; 0 — выкл
 GIFT_AMOUNTS = {"main": (500, 1000, 5000), "tour": (200, 500, 1000)}
 WALLET_NAMES = {"main": "обычных", "tour": "турнирных"}
 
@@ -116,7 +117,16 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
         InlineKeyboardButton(text=f"🛒 Магазин: {'закрыть' if shop_open else 'открыть'}", callback_data="adm:shop"),
         InlineKeyboardButton(text="📢 Анонс магазина", callback_data="adm:shopnews"),
     ])
+    if cfg.game == "baccarat":
+        window = await betting.bet_window(cfg, db)
+        lines.append(f"Закрытие ставок: {f'через {window} с после поста предыдущей игры' if window else 'по посту самой игры'}")
+        rows.append([
+            InlineKeyboardButton(text=("✅ " if window == w else "") + (f"{w} с" if w else "Выкл"),
+                                 callback_data=f"adm:win:{w}")
+            for w in WINDOW_OPTIONS
+        ])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
+    rows.append([InlineKeyboardButton(text=f"♻️ Сбросить балансы ({cfg.reset_amount} всем)", callback_data="adm:reset")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:refresh")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
@@ -137,6 +147,42 @@ async def gift_menu(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]:
     text += "\n\nДругая сумма: <code>/giveall 2000</code> или <code>/giveall турнир 300</code>"
     rows.append([InlineKeyboardButton(text="← Назад", callback_data="adm:refresh")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def reset_confirm(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]:
+    users = await db.users_count()
+    _, stars, buyers = await db.sales_summary()
+    text = (
+        f"♻️ <b>Сбросить балансы?</b>\n\n"
+        f"Каждому из {users} игроков обычный баланс станет <b>{cfg.reset_amount}</b> фишек.\n"
+        "• Открытые ставки и дуэли отменяются без выплат.\n"
+        "• Турнирные фишки, значки, VIP и звания остаются.\n"
+        f"• ⚠️ Фишки, купленные за звёзды, тоже обнулятся (покупателей: {buyers}, звёзд: {stars}).\n"
+        "• Перед сбросом бот сохранит копию базы рядом с файлом.\n\n"
+        "Отменить сброс потом нельзя."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, сбросить и объявить в чате", callback_data="adm:rd:1")],
+        [InlineKeyboardButton(text="✅ Да, без объявления", callback_data="adm:rd:0")],
+        [InlineKeyboardButton(text="Отмена", callback_data="adm:refresh")],
+    ])
+    return text, kb
+
+
+async def do_reset(cfg: Config, db: DB, bot: Bot, announce: bool) -> str:
+    backup = await db.backup()
+    users, bets, duels_n = await db.reset_balances(cfg.reset_amount)
+    if announce:
+        main_chat = await db.get_state("main_chat")
+        if main_chat:
+            window = await betting.bet_window(cfg, db)
+            try:
+                extra = t("reset_window", window=window) if window else ""
+                await bot.send_message(int(main_chat), t("reset_news", amount=cfg.reset_amount, extra=extra))
+            except Exception:
+                log.exception("failed to announce reset")
+    where = f" Копия базы: {backup}." if backup else ""
+    return f"Готово: {users} игрокам выдано по {cfg.reset_amount}, отменено ставок {bets}, дуэлей {duels_n}.{where}"
 
 
 async def gift_confirm(db: DB, wallet: str, amount: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -270,6 +316,17 @@ def build_router(cfg: Config, db: DB) -> Router:
                     note = "Анонс отправлен и закреплён."
                 except Exception:
                     note = "Анонс отправлен."
+        elif action == "win":
+            await db.set_state("bet_window", parts[2])
+            w = int(parts[2])
+            note = f"Ставки закрываются через {w} с после поста предыдущей игры." if w else "Закрытие по таймеру выключено."
+        elif action == "reset":
+            text, kb = await reset_confirm(cfg, db)
+            await query.answer()
+            await query.message.edit_text(text, reply_markup=kb)
+            return
+        elif action == "rd":
+            note = await do_reset(cfg, db, bot, parts[2] == "1")
         elif action == "gd":
             note = await give_all(cfg, db, bot, parts[2], int(parts[3]), parts[4] == "1")
         elif action == "start":

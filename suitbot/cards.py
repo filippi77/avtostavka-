@@ -231,13 +231,15 @@ async def close_for_game(cfg: Config, db: DB, bot: Bot, game: int) -> None:
 
 
 async def window_loop(cfg: Config, db: DB, bot: Bot) -> None:
-    """Закрывает карточку по таймеру BET_WINDOW_SECONDS, не дожидаясь поста игры."""
-    while cfg.bet_window_seconds:
+    """Закрывает карточку по таймеру после поста предыдущей игры, не дожидаясь поста самой игры:
+    канал публикует их с задержкой, а игра на сайте уже идёт. Значение — из /admin."""
+    while True:
         try:
+            window = await betting.bet_window(cfg, db)
             last = await db.last_game()
             seen = await db.game_seen_at(last) if last is not None else None
-            if seen and time.time() > seen + cfg.bet_window_seconds:
-                await close_for_game(cfg, db, bot, last + 1)
+            if window and seen and time.time() > seen + window:
+                await close_for_game(cfg, db, bot, last % cfg.game_number_wrap + 1)
         except Exception:
             log.exception("card window loop failed")
         await asyncio.sleep(2)
