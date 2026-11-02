@@ -154,10 +154,10 @@ async def reset_confirm(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]
     _, stars, buyers = await db.sales_summary()
     text = (
         f"♻️ <b>Сбросить балансы?</b>\n\n"
-        f"Каждому из {users} игроков обычный баланс станет <b>{cfg.reset_amount}</b> фишек.\n"
-        "• Открытые ставки и дуэли отменяются без выплат.\n"
+        f"Игроков: {users}. Обычный баланс станет <b>{cfg.reset_amount}</b> фишек у {users - buyers}.\n"
+        f"• Кто покупал фишки за звёзды ({buyers}, всего {stars} ⭐) — остаются с тем, что у них есть.\n"
+        "• Открытые ставки и дуэли отменяются без выплат; у покупателей замороженные фишки возвращаются.\n"
         "• Турнирные фишки, значки, VIP и звания остаются.\n"
-        f"• ⚠️ Фишки, купленные за звёзды, тоже обнулятся (покупателей: {buyers}, звёзд: {stars}).\n"
         "• Перед сбросом бот сохранит копию базы рядом с файлом.\n\n"
         "Отменить сброс потом нельзя."
     )
@@ -171,7 +171,7 @@ async def reset_confirm(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]
 
 async def do_reset(cfg: Config, db: DB, bot: Bot, announce: bool) -> str:
     backup = await db.backup()
-    users, bets, duels_n = await db.reset_balances(cfg.reset_amount)
+    reset, kept, bets, duels_n = await db.reset_balances(cfg.reset_amount)
     if announce:
         main_chat = await db.get_state("main_chat")
         if main_chat:
@@ -182,7 +182,8 @@ async def do_reset(cfg: Config, db: DB, bot: Bot, announce: bool) -> str:
             except Exception:
                 log.exception("failed to announce reset")
     where = f" Копия базы: {backup}." if backup else ""
-    return f"Готово: {users} игрокам выдано по {cfg.reset_amount}, отменено ставок {bets}, дуэлей {duels_n}.{where}"
+    return (f"Готово: {reset} игрокам выдано по {cfg.reset_amount}, у {kept} покупателей баланс сохранён, "
+            f"отменено ставок {bets}, дуэлей {duels_n}.{where}")
 
 
 async def gift_confirm(db: DB, wallet: str, amount: int) -> tuple[str, InlineKeyboardMarkup]:

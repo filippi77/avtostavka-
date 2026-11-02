@@ -884,17 +884,31 @@ class DB:
         await self.conn.execute("VACUUM INTO ?", (dest,))
         return dest
 
-    async def reset_balances(self, amount: int) -> tuple[int, int, int]:
-        """Всем игрокам обычный баланс = amount. Открытые ставки и дуэли отменяются без выплат
-        (их ставки уже списаны с прежних балансов). Турнирные фишки, магазин и платежи не трогаем.
-        Возвращает (игроков, отменено ставок, отменено дуэлей)."""
-        cur = await self.conn.execute("UPDATE bets SET status = 'voided', payout = 0 WHERE status = 'open'")
-        bets = cur.rowcount
-        cur = await self.conn.execute(
-            "UPDATE duels SET status = 'expired' WHERE status IN ('pending', 'active')"
+    async def reset_balances(self, amount: int) -> tuple[int, int, int, int]:
+        """Игрокам, которые не покупали фишки за звёзды, обычный баланс = amount. Купившие сохраняют баланс.
+
+        Открытые ставки и дуэли отменяются: у остальных без выплат (их ставки уже списаны с прежних
+        балансов), а покупателям замороженные фишки возвращаются, чтобы они ничего не потеряли.
+        Турнирные фишки, магазин и платежи не трогаем.
+        Возвращает (сброшено, сохранено у покупателей, отменено ставок, отменено дуэлей)."""
+        buyers = "SELECT DISTINCT user_id FROM payments"
+        # покупателям возвращаем ставки открытых ставок, остальным — просто отменяем
+        await self.conn.execute(
+            f"UPDATE users SET balance = balance + COALESCE((SELECT SUM(amount) FROM bets "
+            f"WHERE bets.user_id = users.id AND status = 'open' AND wallet = 'main'), 0) WHERE id IN ({buyers})"
         )
+        cur = await self.conn.execute("UPDATE bets SET status = 'voided', payout = 0 WHERE status = 'open' AND wallet = 'main'")
+        bets = cur.rowcount
+        # то же для дуэлей: у активной дуэли ставка уже списана с обоих участников
+        for duel in await (await self.conn.execute("SELECT * FROM duels WHERE status = 'active'")).fetchall():
+            for uid in (duel["challenger_id"], duel["opponent_id"]):
+                await self.conn.execute(
+                    f"UPDATE users SET balance = balance + ? WHERE id = ? AND id IN ({buyers})", (duel["stake"], uid)
+                )
+        cur = await self.conn.execute("UPDATE duels SET status = 'expired' WHERE status IN ('pending', 'active')")
         duels = cur.rowcount
-        cur = await self.conn.execute("UPDATE users SET balance = ?", (amount,))
-        users = cur.rowcount
+        cur = await self.conn.execute(f"UPDATE users SET balance = ? WHERE id NOT IN ({buyers})", (amount,))
+        reset = cur.rowcount
+        kept = (await (await self.conn.execute(f"SELECT COUNT(*) AS n FROM users WHERE id IN ({buyers})")).fetchone())["n"]
         await self.conn.commit()
-        return users, bets, duels
+        return reset, kept, bets, duels
