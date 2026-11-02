@@ -21,7 +21,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from .access import SubscriptionChecker
 from .config import Config
 from .db import DB
-from . import activity, i18n
+from . import activity, betting, i18n
 from .i18n import suit_label, t
 from .parser import SUITS
 
@@ -342,7 +342,8 @@ def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) ->
         if query.from_user.id not in (duel["challenger_id"], duel["opponent_id"]):
             await query.answer(t("duel_foreign"), show_alert=True)
             return
-        if await _seen(db, duel, int(game)):
+        # Как и ставки: выбор закрывается по таймеру, не дожидаясь запоздавшего поста игры.
+        if await _seen(db, duel, int(game)) or await betting.timer_closed(cfg, db, int(game)):
             await query.answer(t("duel_pick_late", game=game), show_alert=True)
             await refresh(cfg, db, bot, duel["id"])
             return

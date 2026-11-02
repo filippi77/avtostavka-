@@ -37,6 +37,17 @@ async def bet_window(cfg: Config, db: DB) -> int:
     return int(mode)
 
 
+async def timer_closed(cfg: Config, db: DB, game: int) -> bool:
+    """Приём на ближайшую игру уже закрыт по таймеру (до того, как в канале появился её пост).
+    Общая проверка для ставок и дуэлей."""
+    window = await bet_window(cfg, db)
+    last = await db.last_game()
+    if not window or last is None or (game - last) % cfg.game_number_wrap != 1:
+        return False
+    seen = await db.game_seen_at(last)
+    return bool(seen and time.time() > seen + window)
+
+
 class BetError(Exception):
     """Ставка не принята; текст исключения можно показать игроку."""
 
@@ -94,11 +105,8 @@ async def place(
         raise BetError(t("bet_range", last=last, first=last + 1, to=last + cfg.max_games_ahead))
     if await db.game_seen_since(game, int(time.time()) - cfg.bet_ttl_hours * 3600):
         raise BetError(t("bet_started", game=game))
-    window = await bet_window(cfg, db)
-    if window and ahead == 1:
-        seen = await db.game_seen_at(last)
-        if seen and time.time() > seen + window:
-            raise BetError(t("bet_window", game=game))
+    if await timer_closed(cfg, db, game):
+        raise BetError(t("bet_window", game=game))
 
     if tournament_id is not None:
         await db.join_tournament(tournament_id, user_id, cfg.tournament_start_chips)

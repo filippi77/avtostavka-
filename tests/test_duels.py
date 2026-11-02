@@ -175,3 +175,40 @@ def test_challenger_changes_length_only_while_pending(tmp_path):
         assert not await db.set_duel_games(duel_id, 1)  # после принятия не меняется
 
     run_with_db(tmp_path, body)
+
+
+def test_duel_pick_closes_by_timer_like_bets(tmp_path):
+    import datetime
+
+    from aiogram import Dispatcher
+    from aiogram.types import Update
+
+    from suitbot import betting
+    from suitbot.access import SubscriptionChecker
+
+    async def body(db):
+        duel_id = await start_duel(db)  # игра 207 уже видна, дуэль стартует с 208
+        await db.set_state("bet_window", "30")
+        bot = FakeBot()
+        dp = Dispatcher()
+        dp.include_router(duels.build_router(DCFG, db, lambda u: db.ensure_user(u.id, u.first_name, 500),
+                                             SubscriptionChecker(DCFG)))
+
+        def pick(uid):
+            return Update.model_validate({"update_id": 1, "callback_query": {
+                "id": "1", "chat_instance": "x", "data": f"duel:p:{duel_id}:208:♥",
+                "from": {"id": uid, "is_bot": False, "first_name": "u"},
+                "message": {"message_id": 1, "date": datetime.datetime.now(),
+                            "chat": {"id": -100, "type": "supergroup"}, "text": "x"}}})
+
+        await db.conn.execute("UPDATE games SET seen_at = ? WHERE number = 207", (int(time.time()) - 10,))
+        assert not await betting.timer_closed(DCFG, db, 208)
+        await dp.feed_update(bot, pick(1))
+        assert [p["suit"] for p in await db.duel_picks(duel_id)] == ["♥"]  # 10 с после поста — можно
+
+        await db.conn.execute("UPDATE games SET seen_at = ? WHERE number = 207", (int(time.time()) - 31,))
+        assert await betting.timer_closed(DCFG, db, 208)
+        await dp.feed_update(bot, pick(2))
+        assert [p["user_id"] for p in await db.duel_picks(duel_id)] == [1]  # через 31 с — отклонено
+
+    run_with_db(tmp_path, body)
