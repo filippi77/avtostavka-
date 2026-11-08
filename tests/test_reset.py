@@ -177,3 +177,20 @@ def test_interval_ignores_gaps_and_other_modes(tmp_path):
         assert await betting.bet_window(replace(RCFG, game="penalty"), db) == 0  # у пенальти свой механизм
 
     run_with_db(tmp_path, body)
+
+
+def test_bank_report_shows_house_result(tmp_path):
+    async def body(db):
+        await db.ensure_user(1, "a", 1000)
+        await db.ensure_user(2, "b", 1000)
+        await db.place_bet(1, -100, 5, "suit", "♥", 100, 1.9)
+        await db.place_bet(2, -100, 5, "suit", "♠", 100, 1.9)
+        bets = await db.open_bets_for_game(5)
+        await db.settle_bet(bets[0]["id"], True, 190)
+        await db.settle_bet(bets[1]["id"], False, 0)
+        e = await db.economy()
+        assert (e["wagered"], e["paid"]) == (200, 190)
+        text, _ = await admin.bank_report(RCFG, db)
+        assert "букмекер в плюсе" in text and "+10" in text
+
+    run_with_db(tmp_path, body)

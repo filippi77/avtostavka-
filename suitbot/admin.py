@@ -138,6 +138,7 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
                 InlineKeyboardButton(text=("✅ " if reserve == r else "") + f"запас {r} с", callback_data=f"adm:res:{r}")
                 for r in RESERVE_OPTIONS
             ])
+    rows.append([InlineKeyboardButton(text="💼 Банк букмекера", callback_data="adm:bank")])
     rows.append([InlineKeyboardButton(text="🎁 Выдать всем фишки", callback_data="adm:gift")])
     rows.append([InlineKeyboardButton(text=f"♻️ Сбросить балансы ({cfg.reset_amount} всем)", callback_data="adm:reset")])
     rows.append([InlineKeyboardButton(text="📢 Приглашение в чат (и закрепить)", callback_data="adm:invite")])
@@ -148,6 +149,37 @@ async def panel(cfg: Config, db: DB, bot: Bot) -> tuple[str, InlineKeyboardMarku
 def duel_news_text(cfg: Config) -> str:
     return t("duel_news", min=cfg.duel_min_stake, max=cfg.duel_max_stake,
              options=", ".join(map(str, cfg.duel_game_options)))
+
+
+async def bank_report(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]:
+    """Кто выигрывает: букмекер или игроки, и сколько фишек сейчас в обороте."""
+    day = await db.economy(int(time.time()) - 86400)
+    total = await db.economy()
+
+    def line(title: str, e: dict) -> str:
+        profit = e["wagered"] - e["paid"]
+        rtp = f"{100 * e['paid'] / e['wagered']:.1f}%" if e["wagered"] else "—"
+        sign = "🟢 букмекер в плюсе" if profit > 0 else "🔴 букмекер в минусе" if profit < 0 else "⚪️ ровно"
+        return (f"<b>{title}</b>: ставок {e['bets']}, поставлено {e['wagered']:,}, выплачено {e['paid']:,} "
+                f"(возврат игрокам {rtp})\n{sign}: {profit:+,} фишек").replace(",", " ")
+
+    cap = cfg.emission_cap
+    circ = total["circulation"]
+    cap_line = f"В обороте: {circ:,} фишек у {total['players']} игроков".replace(",", " ")
+    if cap:
+        pct = 100 * circ / cap
+        cap_line += f" — {pct:.0f}% от лимита {cap:,}".replace(",", " ")
+        if circ > cap:
+            cap_line += "\n⚠️ Лимит превышен: не выдавайте больше бесплатных фишек."
+    lines = [
+        "💼 <b>Банк букмекера</b> (основной кошелёк, без турниров)", "",
+        line("За 24 часа", day), "", line("За всё время", total), "", cap_line,
+        f"Куплено за звёзды: {total['stars']} ⭐ ({total['bought_chips']:,} фишек)".replace(",", " "),
+        "",
+        "Фишки нельзя вывести, поэтому реальные расходы — только призы в звёздах. "
+        "Плюс букмекера значит, что фишки уходят из оборота; минус — что игроки копят больше, чем тратят.",
+    ]
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="← Назад", callback_data="adm:refresh")]])
 
 
 async def gift_menu(cfg: Config, db: DB) -> tuple[str, InlineKeyboardMarkup]:
@@ -273,6 +305,11 @@ def build_router(cfg: Config, db: DB) -> Router:
         action = parts[1]
         note = None
 
+        if action == "bank":
+            text, kb = await bank_report(cfg, db)
+            await query.answer()
+            await query.message.edit_text(text, reply_markup=kb)
+            return
         if action in ("gift", "gq"):
             # Подменю выдачи и подтверждение — показываем их вместо панели.
             text, kb = await gift_menu(cfg, db) if action == "gift" else await gift_confirm(db, parts[2], int(parts[3]))

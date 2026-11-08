@@ -243,6 +243,26 @@ class DB:
         user = await self.get_user(user_id)
         return user["last_spin"] + period - now
 
+    async def economy(self, since: int = 0) -> dict:
+        """Сводка по основному кошельку: сколько поставлено и выплачено (с момента since),
+        сколько фишек у игроков сейчас, сколько звёзд заплатили за фишки."""
+        cur = await self.conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS wagered, COALESCE(SUM(payout), 0) AS paid, COUNT(*) AS n "
+            "FROM bets WHERE wallet = 'main' AND status IN ('won', 'lost') AND created_at >= ?", (since,))
+        bets = await cur.fetchone()
+        cur = await self.conn.execute("SELECT COALESCE(SUM(balance), 0) AS s, COUNT(*) AS n FROM users")
+        users = await cur.fetchone()
+        cur = await self.conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS s FROM bets WHERE wallet = 'main' AND status = 'open'")
+        open_stakes = (await cur.fetchone())["s"]
+        cur = await self.conn.execute("SELECT COALESCE(SUM(stars), 0) AS stars, COALESCE(SUM(chips), 0) AS chips FROM payments")
+        pay = await cur.fetchone()
+        return {
+            "wagered": bets["wagered"], "paid": bets["paid"], "bets": bets["n"],
+            "circulation": users["s"] + open_stakes, "players": users["n"],
+            "stars": pay["stars"], "bought_chips": pay["chips"],
+        }
+
     async def users_count(self) -> int:
         cur = await self.conn.execute("SELECT COUNT(*) AS n FROM users")
         return (await cur.fetchone())["n"]
