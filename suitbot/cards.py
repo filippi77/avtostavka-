@@ -43,10 +43,12 @@ def frequency_label(every: int) -> str:
 SIDE_ICONS = {"P": "🎯", "B": "🏦", "T": "⚖️"}
 
 
-def cards_row(game: int) -> list[InlineKeyboardButton]:
-    """Ставка на число карт: у игрока или банкира будет 2 или 3."""
-    return [InlineKeyboardButton(text=f"{SIDE_ICONS[s]} {n} карты", callback_data=f"b:{game}:cards:{s}{n}")
-            for s in "PB" for n in (2, 3)]
+def cards_row(game: int, odds: tuple[float, float] = (2.4, 7.8)) -> list[InlineKeyboardButton]:
+    """«Раздача» — у обоих по 2 карты, игра стоп; «2/3» — тотал карт: у игрока 2, у банкира 3."""
+    return [
+        InlineKeyboardButton(text=f"🃏 {t('pick_deal').capitalize()} ×{odds[0]:g}", callback_data=f"b:{game}:cards:22"),
+        InlineKeyboardButton(text=f"🃏 2/3 ×{odds[1]:g}", callback_data=f"b:{game}:cards:23"),
+    ]
 
 
 def bar(n: int, cells: int = 8, full: int = 20) -> str:
@@ -76,12 +78,13 @@ def card_text(cfg: Config, game: int, counts: dict[str, int], closed: bool, tour
     return "\n".join(lines)
 
 
-def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duels_on: bool = False) -> InlineKeyboardMarkup:
+def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duels_on: bool = False,
+                  odds: tuple[float, float] = (2.4, 7.8)) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
         [InlineKeyboardButton(text=f"{SIDE_ICONS[code]} {betting.side_name(code).capitalize()}",
                               callback_data=f"b:{game}:side:{code}") for code in betting.SIDES],
-        cards_row(game),
+        cards_row(game, odds),
         *[[InlineKeyboardButton(text=f"💰 {x}", callback_data=f"st:{x}") for x in row] for row in STAKE_ROWS],
     ]
     if tournament_on:
@@ -99,13 +102,13 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duel
 
 
 def picker_keyboard(game: int, info: dict | None, tournament_on: bool, stake: int | None = None,
-                    wallet: str | None = None) -> InlineKeyboardMarkup:
+                    wallet: str | None = None, odds: tuple[float, float] = (2.4, 7.8)) -> InlineKeyboardMarkup:
     """Выбор ставки в личке: масть или исход, сумма, кошелёк. Текущие сумма и кошелёк отмечены ✓."""
     if info is None:
         bets = [[InlineKeyboardButton(text=suit_label(x), callback_data=f"b:{game}:suit:{x}") for x in SUITS],
                 [InlineKeyboardButton(text=f"{SIDE_ICONS[c]} {betting.side_name(c).capitalize()}",
                                       callback_data=f"b:{game}:side:{c}") for c in betting.SIDES],
-                cards_row(game)]
+                cards_row(game, odds)]
     else:
         odds = info["odds"]
         bets = []
@@ -158,7 +161,7 @@ async def _render(cfg: Config, db: DB, game: int, counts: dict[str, int], closed
             return None
         kb = None if closed else pen_card_keyboard(game, info, on, me_username, duels_on)
         return pen_card_text(game, info, counts, closed, on), kb
-    kb = None if closed else card_keyboard(game, on, me_username, duels_on)
+    kb = None if closed else card_keyboard(game, on, me_username, duels_on, (cfg.payout_deal, cfg.payout_total_cards))
     return card_text(cfg, game, counts, closed, on), kb
 
 
@@ -185,7 +188,8 @@ async def send_picker(cfg: Config, db: DB, bot: Bot, chat_id: int, game: int) ->
         lines.append(t("picker_mine", items=", ".join(
             f"{describe_pick_text(b)} · {b['amount']}" for b in mine)))
     await bot.send_message(chat_id, "\n".join(lines),
-                           reply_markup=picker_keyboard(game, info, on, user["pref_stake"], user["pref_wallet"]))
+                           reply_markup=picker_keyboard(game, info, on, user["pref_stake"], user["pref_wallet"],
+                                                   (cfg.payout_deal, cfg.payout_total_cards)))
 
 
 def describe_pick_text(bet) -> str:

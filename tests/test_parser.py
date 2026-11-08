@@ -69,5 +69,6 @@ def test_hourglass_post_from_channel():
 
 def test_cards_bet():
     r = parse_game("#N7. 8(5♦ 3♦) - 9(Q♠ 4♥ 5♣)")
-    assert bet_wins("cards", "P2", r) and not bet_wins("cards", "P3", r)
-    assert bet_wins("cards", "B3", r) and not bet_wins("cards", "B2", r)
+    assert bet_wins("cards", "23", r) and not bet_wins("cards", "22", r)
+    r = parse_game("#N8. 8(5♦ 3♦) - 7(Q♠ 7♥)")
+    assert bet_wins("cards", "22", r) and not bet_wins("cards", "23", r)

@@ -58,7 +58,7 @@ def describe_pick(kind: str, pick: str, info: dict | None = None) -> str:
     if kind == "side":
         return side_name(pick)
     if kind == "cards":
-        return t("pick_cards", side=side_name(pick[0]), n=pick[1])
+        return t("pick_deal") if pick == "22" else t("pick_cards", p=pick[0], b=pick[1])
     if kind == "win":
         team = (info or {}).get("home" if pick == "1" else "away", "")
         return t("pick_win", side=pick, team=team).strip()
