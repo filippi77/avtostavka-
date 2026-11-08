@@ -47,6 +47,8 @@ class Config:
     # число — секунд после поста предыдущей игры, 0 — только по посту самой игры. Меняется в /admin.
     bet_window_default: str = os.getenv("BET_WINDOW", "auto")
     bet_reserve_seconds: int = int(os.getenv("BET_RESERVE_SECONDS", "20"))
+    # Сколько секунд висит пост с итогами игры, потом удаляется (0 — не удалять).
+    result_ttl: int = int(os.getenv("RESULT_TTL", "5"))
     # Сброс балансов из /admin: сколько фишек получает каждый игрок.
     reset_amount: int = int(os.getenv("RESET_AMOUNT", "5000"))
 

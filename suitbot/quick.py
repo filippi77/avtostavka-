@@ -67,6 +67,16 @@ async def _delete_later(message: Message, delay: int) -> None:
         pass
 
 
+_pending: set[asyncio.Task] = set()
+
+
+def schedule_delete(message: Message, delay: int) -> None:
+    """Удалить сообщение через delay секунд (ссылку на задачу держим, чтобы её не собрал GC)."""
+    task = asyncio.create_task(_delete_later(message, delay))
+    _pending.add(task)
+    task.add_done_callback(_pending.discard)
+
+
 def build_router(cfg: Config, db: DB, ensure_user, subs: SubscriptionChecker) -> Router:
     router = Router()
 

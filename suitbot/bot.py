@@ -407,7 +407,9 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
         for chat_id, lines in reports.items():
             try:
                 # Одна строка на всех: кто на что ставил и чем кончилось.
-                await bot.send_message(chat_id, f"{header}\n{' · '.join(lines)}")
+                sent = await bot.send_message(chat_id, f"{header}\n{' · '.join(lines)}")
+                if cfg.result_ttl > 0:
+                    quick.schedule_delete(sent, cfg.result_ttl)
             except Exception:
                 log.exception("failed to post results to %s", chat_id)
 
