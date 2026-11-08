@@ -27,7 +27,7 @@ from .parser import SUITS
 log = logging.getLogger(__name__)
 
 # Суммы на кнопках карточки, по рядам. Последняя — для VIP (ставки до VIP_MAX_BET).
-STAKE_ROWS = ((50, 100, 500),)
+STAKE_ROWS = ((100, 200, 400), (1000, 2000, 5000))
 CARD_FREQUENCIES = (1, 5, 10, 0)  # варианты в панели; 0 — выключено
 RATING_COOLDOWN = 5  # секунд между нажатиями «Рейтинг» одним игроком
 
@@ -82,9 +82,6 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duel
                   odds: tuple[float, float] = (2.4, 7.8)) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
-        [InlineKeyboardButton(text=f"{SIDE_ICONS[code]} {betting.side_name(code).capitalize()}",
-                              callback_data=f"b:{game}:side:{code}") for code in betting.SIDES],
-        cards_row(game, odds),
         *[[InlineKeyboardButton(text=f"💰 {x}", callback_data=f"st:{x}") for x in row] for row in STAKE_ROWS],
     ]
     if tournament_on:
@@ -106,9 +103,7 @@ def picker_keyboard(game: int, info: dict | None, tournament_on: bool, stake: in
     """Выбор ставки в личке: масть или исход, сумма, кошелёк. Текущие сумма и кошелёк отмечены ✓."""
     if info is None:
         bets = [[InlineKeyboardButton(text=suit_label(x), callback_data=f"b:{game}:suit:{x}") for x in SUITS],
-                [InlineKeyboardButton(text=f"{SIDE_ICONS[c]} {betting.side_name(c).capitalize()}",
-                                      callback_data=f"b:{game}:side:{c}") for c in betting.SIDES],
-                cards_row(game, odds)]
+]
     else:
         odds = info["odds"]
         bets = []
@@ -148,7 +143,7 @@ def pen_card_keyboard(game: int, info: dict, tournament_on: bool, bot_username: 
         rows.append([InlineKeyboardButton(text=f"{betting.describe_pick('total', x + format(info['line'], 'g'))} ×{odds[x]:g}",
                                           callback_data=f"b:{game}:total:{x}") for x in ("O", "U")])
     base = card_keyboard(game, tournament_on, bot_username, duels_on).inline_keyboard
-    return InlineKeyboardMarkup(inline_keyboard=[*rows, *base[2:]])  # суммы, кошелёк и нижний ряд — как в баккаре
+    return InlineKeyboardMarkup(inline_keyboard=[*rows, *base[1:]])  # суммы, кошелёк и нижний ряд — как в баккаре
 
 
 async def _render(cfg: Config, db: DB, game: int, counts: dict[str, int], closed: bool, me_username: str | None):

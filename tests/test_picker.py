@@ -16,7 +16,7 @@ from test_tournament import CFG, FakeBot, run_with_db
 def test_group_card_has_bet_buttons(tmp_path):
     kb = card_keyboard(208, False, "suit_bot")
     data = [b.callback_data for row in kb.inline_keyboard for b in row if b.callback_data]
-    assert "b:208:suit:♥" in data and "b:208:side:P" in data and "st:50" in data
+    assert "b:208:suit:♥" in data and "st:100" in data and "st:5000" in data
 
 
 def test_private_pick_records_bet_in_main_chat(tmp_path):
