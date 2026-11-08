@@ -57,6 +57,8 @@ def describe_pick(kind: str, pick: str, info: dict | None = None) -> str:
         return suit_label(pick)
     if kind == "side":
         return side_name(pick)
+    if kind == "cards":
+        return t("pick_cards", side=side_name(pick[0]), n=pick[1])
     if kind == "win":
         team = (info or {}).get("home" if pick == "1" else "away", "")
         return t("pick_win", side=pick, team=team).strip()

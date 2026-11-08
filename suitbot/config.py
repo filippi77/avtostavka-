@@ -60,6 +60,7 @@ class Config:
     payout_player: float = float(os.getenv("PAYOUT_PLAYER", "1.95"))
     payout_banker: float = float(os.getenv("PAYOUT_BANKER", "1.95"))
     payout_tie: float = float(os.getenv("PAYOUT_TIE", "8"))
+    payout_cards: float = float(os.getenv("PAYOUT_CARDS", "1.9"))  # ставка на 2 или 3 карты
 
     # Карточки игр с кнопками: как часто публиковать (каждую N-ю игру, 0 — выключено;
     # меняется из /admin). Карточка на игру N+1 выходит сразу, как появился пост игры N.
@@ -146,4 +147,6 @@ class Config:
     def payout(self, kind: str, pick: str) -> float:
         if kind == "suit":
             return self.payout_suit
+        if kind == "cards":
+            return self.payout_cards
         return {"P": self.payout_player, "B": self.payout_banker, "T": self.payout_tie}[pick]

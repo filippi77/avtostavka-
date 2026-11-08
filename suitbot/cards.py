@@ -43,6 +43,12 @@ def frequency_label(every: int) -> str:
 SIDE_ICONS = {"P": "🎯", "B": "🏦", "T": "⚖️"}
 
 
+def cards_row(game: int) -> list[InlineKeyboardButton]:
+    """Ставка на число карт: у игрока или банкира будет 2 или 3."""
+    return [InlineKeyboardButton(text=f"{SIDE_ICONS[s]} {n} карты", callback_data=f"b:{game}:cards:{s}{n}")
+            for s in "PB" for n in (2, 3)]
+
+
 def bar(n: int, cells: int = 8, full: int = 20) -> str:
     """Полоска заполненности: сколько ставок по сравнению с «полным» залом."""
     filled = min(cells, round(cells * min(n, full) / full))
@@ -75,6 +81,7 @@ def card_keyboard(game: int, tournament_on: bool, bot_username: str | None, duel
         [InlineKeyboardButton(text=suit_label(s), callback_data=f"b:{game}:suit:{s}") for s in SUITS],
         [InlineKeyboardButton(text=f"{SIDE_ICONS[code]} {betting.side_name(code).capitalize()}",
                               callback_data=f"b:{game}:side:{code}") for code in betting.SIDES],
+        cards_row(game),
         *[[InlineKeyboardButton(text=f"💰 {x}", callback_data=f"st:{x}") for x in row] for row in STAKE_ROWS],
     ]
     if tournament_on:
@@ -97,7 +104,8 @@ def picker_keyboard(game: int, info: dict | None, tournament_on: bool, stake: in
     if info is None:
         bets = [[InlineKeyboardButton(text=suit_label(x), callback_data=f"b:{game}:suit:{x}") for x in SUITS],
                 [InlineKeyboardButton(text=f"{SIDE_ICONS[c]} {betting.side_name(c).capitalize()}",
-                                      callback_data=f"b:{game}:side:{c}") for c in betting.SIDES]]
+                                      callback_data=f"b:{game}:side:{c}") for c in betting.SIDES],
+                cards_row(game)]
     else:
         odds = info["odds"]
         bets = []

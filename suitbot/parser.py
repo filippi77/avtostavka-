@@ -120,4 +120,7 @@ def bet_wins(kind: str, pick: str, result: GameResult) -> bool:
         return pick in result.player_suits
     if kind == "side":
         return pick == result.winner
+    if kind == "cards":  # "P2" / "P3" / "B2" / "B3": сколько карт у игрока или банкира
+        hand = result.player_cards if pick[0] == "P" else result.banker_cards
+        return len(hand) == int(pick[1])
     raise ValueError(f"unknown bet kind: {kind}")
