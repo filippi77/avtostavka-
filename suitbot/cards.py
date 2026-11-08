@@ -27,7 +27,7 @@ from .parser import SUITS
 log = logging.getLogger(__name__)
 
 # Суммы на кнопках карточки, по рядам. Последняя — для VIP (ставки до VIP_MAX_BET).
-STAKE_ROWS = ((50, 100, 500), (1000, 5000, 25000))
+STAKE_ROWS = ((50, 100, 500),)
 CARD_FREQUENCIES = (1, 5, 10, 0)  # варианты в панели; 0 — выключено
 RATING_COOLDOWN = 5  # секунд между нажатиями «Рейтинг» одним игроком
 

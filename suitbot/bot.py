@@ -382,20 +382,27 @@ def build_router(cfg: Config, db: DB, subs: SubscriptionChecker) -> Router:
             return
         info = await db.get_penalty_game(number, since()) if cfg.game == "penalty" else None
 
-        reports: dict[int, list[str]] = defaultdict(list)
+        # Несколько ставок одного игрока на одно и то же суммируются в одну запись.
+        merged: dict[int, dict[tuple, list[int]]] = defaultdict(dict)
         for bet in bets:
             won = wins(bet["kind"], bet["pick"])
             payout = int(bet["amount"] * bet["coef"]) if won else 0
             if not await db.settle_bet(bet["id"], won, payout):
                 continue  # уже рассчитана (например, повторное редактирование поста)
-            if won:
-                mark = f"✅ +{payout}" + (" 🔥" if payout >= 1000 else "")
-            else:
-                mark = f"❌ −{bet['amount']}"
-            cup = "🏆" if bet["wallet"] == "tour" else ""
-            reports[bet["chat_id"]].append(
-                f"{cup}{escape(bet['name'])} {describe_pick(bet['kind'], bet['pick'], info)} {mark}".strip()
-            )
+            key = (bet["name"], bet["wallet"] == "tour", describe_pick(bet["kind"], bet["pick"], info), won)
+            acc = merged[bet["chat_id"]].setdefault(key, [0, 0])
+            acc[0] += payout if won else bet["amount"]
+            acc[1] += 1
+
+        reports: dict[int, list[str]] = defaultdict(list)
+        for chat_id, items in merged.items():
+            for (name, tour, pick, won), (total, n) in items.items():
+                if won:
+                    mark = f"✅ +{total}" + (" 🔥" if total >= 1000 else "")
+                else:
+                    mark = f"❌ −{total}"
+                cup = "🏆" if tour else ""
+                reports[chat_id].append(f"{cup}{escape(name)} {pick} {mark}" + (f" (×{n})" if n > 1 else ""))
 
         for chat_id, lines in reports.items():
             try:
