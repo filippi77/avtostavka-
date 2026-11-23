@@ -1,0 +1,8 @@
+{
+  "appId": "de.avtostavka.app",
+  "appName": "Avtostavka",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

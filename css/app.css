@@ -64,12 +64,12 @@ button svg, .tab svg, .empty-icon svg, .install-hint svg, .photo-drop svg {
 /* ---------- Kopfzeile ---------- */
 .topbar {
   position: fixed; inset: 0 0 auto 0; z-index: 1000;
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   background: var(--bar);
   -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
   border-bottom: .5px solid var(--line);
 }
-.topbar-row { height: var(--top-h); display: flex; align-items: center; gap: 8px; padding: 0 12px 0 max(16px, env(safe-area-inset-left)); }
+.topbar-row { height: var(--top-h); display: flex; align-items: center; gap: 8px; padding: 0 12px 0 max(16px, var(--safe-area-inset-left, env(safe-area-inset-left, 0px))); }
 .titles { flex: 1; min-width: 0; }
 .topbar h1 { font-size: 28px; font-weight: 700; letter-spacing: -.02em; margin: 0; line-height: 1.1; }
 .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -84,14 +84,14 @@ button svg, .tab svg, .empty-icon svg, .install-hint svg, .photo-drop svg {
 
 main {
   position: fixed; left: 0; right: 0;
-  top: calc(var(--top-h) + 3px + env(safe-area-inset-top));
-  bottom: calc(var(--tab-h) + env(safe-area-inset-bottom));
+  top: calc(var(--top-h) + 3px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
+  bottom: calc(var(--tab-h) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
 }
 .view { position: absolute; inset: 0; display: none; }
 .view.active { display: block; }
 #view-list {
   overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 8px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+  padding: 8px max(16px, var(--safe-area-inset-right, env(safe-area-inset-right, 0px))) 32px max(16px, var(--safe-area-inset-left, env(safe-area-inset-left, 0px)));
 }
 #view-list > * { max-width: 640px; margin-left: auto; margin-right: auto; }
 
@@ -250,8 +250,8 @@ main {
 /* ---------- Tab-Leiste ---------- */
 .tabbar {
   position: fixed; inset: auto 0 0 0; z-index: 1000;
-  height: calc(var(--tab-h) + env(safe-area-inset-bottom));
-  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  height: calc(var(--tab-h) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+  padding: 0 var(--safe-area-inset-right, env(safe-area-inset-right, 0px)) var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: stretch;
   background: var(--bar); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
   border-top: .5px solid var(--line);
@@ -274,7 +274,7 @@ main {
 
 /* ---------- Bottom-Sheets ---------- */
 dialog.sheet {
-  width: 100%; max-width: 600px; max-height: calc(100dvh - env(safe-area-inset-top) - 12px);
+  width: 100%; max-width: 600px; max-height: calc(100dvh - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - 12px);
   margin: auto auto 0; padding: 0; border: 0; border-radius: 16px 16px 0 0;
   background: var(--bg); color: var(--text); overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
@@ -283,7 +283,7 @@ dialog.sheet[open] { animation: sheetIn .28s cubic-bezier(.2, .9, .3, 1); }
 @media (min-width: 700px) { dialog.sheet { margin: auto; border-radius: 16px; } }
 dialog.sheet::backdrop { background: rgba(0, 0, 0, .4); }
 .grabber { width: 36px; height: 5px; border-radius: 3px; background: var(--line); margin: 6px auto 0; }
-.sheet-body { padding: 6px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 14px; }
+.sheet-body { padding: 6px 16px calc(16px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); display: grid; gap: 14px; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }
 .sheet-head h2 { margin: 0; font-size: 22px; font-weight: 700; }
 .sheet-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -347,7 +347,7 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .4); }
 .progress-bar div { height: 100%; width: 0; background: var(--blue); transition: width .2s; }
 
 .toast {
-  position: fixed; left: 50%; bottom: calc(var(--tab-h) + 18px + env(safe-area-inset-bottom)); z-index: 3000;
+  position: fixed; left: 50%; bottom: calc(var(--tab-h) + 18px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); z-index: 3000;
   transform: translate(-50%, 16px); opacity: 0; pointer-events: none; transition: .25s;
   background: rgba(30, 30, 32, .92); color: #fff; padding: 12px 18px; border-radius: 14px; font-size: 15px;
   max-width: calc(100% - 32px); width: max-content; text-align: center;

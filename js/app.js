@@ -10,6 +10,13 @@ const KEY = 'avtostavka.v1';
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const IS_STANDALONE = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 
+// Android-App (Capacitor): nativer Live-Scanner mit Google ML Kit
+const IS_NATIVE = !!window.Capacitor?.isNativePlatform?.();
+const NativeScanner = (() => {
+  if (!IS_NATIVE) return null;
+  try { return window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin('LabelScanner') : window.Capacitor.Plugins?.LabelScanner; } catch { return null; }
+})();
+
 const defaults = {
   stops: [],
   route: null,
@@ -312,15 +319,37 @@ function openAdd({ edit = null, scan = false } = {}) {
   $('#btnAdd').textContent = t(edit ? 'save' : 'add');
   resetForm();
   if (!dlg.open) dlg.showModal();
-  if (!edit) warmUp(state.settings.ocr);
-  if (scan) $('#fileCamera').click();
+  if (!edit && !NativeScanner) warmUp(state.settings.ocr);
+  if (scan) startCamera();
 }
 
 $('#tabScan').addEventListener('click', () => openAdd({ scan: true }));
 $('#btnScanEmpty').addEventListener('click', () => openAdd({ scan: true }));
 $('#btnManualEmpty').addEventListener('click', () => { openAdd(); $('#addrInput').focus(); });
 $('#btnManual').addEventListener('click', () => { openAdd(); $('#addrInput').focus(); });
-$('#btnCamera').addEventListener('click', () => $('#fileCamera').click());
+$('#btnCamera').addEventListener('click', () => startCamera());
+
+/** Live-Scanner (Android-App) bzw. Foto aufnehmen (Browser). */
+function startCamera() {
+  if (NativeScanner) nativeScan();
+  else $('#fileCamera').click();
+}
+
+async function nativeScan() {
+  try {
+    const r = await NativeScanner.scan({ lang: getLang() });
+    if (!r || r.cancelled || !r.text) return;
+    if (!dlg.open) openAdd();
+    if (!editing) resetForm();
+    $('#rawText').textContent = r.text.trim();
+    $('#rawBox').hidden = false;
+    await processText(r.text);
+  } catch (err) {
+    console.error(err);
+    if (!dlg.open) openAdd();
+    setGeoStatus(t('ocr_error') + (err.message || err), true);
+  }
+}
 $('#btnGallery').addEventListener('click', () => $('#fileGallery').click());
 $('#fileCamera').addEventListener('change', onPhoto);
 $('#fileGallery').addEventListener('change', onPhoto);
@@ -354,19 +383,8 @@ async function onPhoto(e) {
     }, state.settings.ocr);
     $('#rawText').textContent = text.trim() || t('no_text');
     $('#rawBox').hidden = false;
-    const r = extractAddress(text);
-    if (!r.address) {
-      $('#rawBox').open = true;
-      setGeoStatus(t('ocr_none'), true);
-      return;
-    }
-    $('#addrInput').value = r.address;
-    if (r.name) $('#nameInput').value = r.name;
-    if (r.phone) $('#phoneInput').value = r.phone;
-    if (r.note) $('#noteInput').value = r.note;
-    if (r.confidence === 'low') $('#rawBox').open = true;
     pr.hidden = true;
-    await findCandidates({ auto: state.settings.autoAdd && r.confidence !== 'low' });
+    await processText(text);
   } catch (err) {
     console.error(err);
     setGeoStatus(t('ocr_error') + (err.message || err), true);
@@ -374,6 +392,22 @@ async function onPhoto(e) {
     pr.hidden = true;
     $('#btnFind').disabled = false;
   }
+}
+
+/** Adresse aus erkanntem Text übernehmen und auf der Karte suchen. */
+async function processText(text) {
+  const r = extractAddress(text);
+  if (!r.address) {
+    $('#rawBox').open = true;
+    setGeoStatus(t('ocr_none'), true);
+    return;
+  }
+  $('#addrInput').value = r.address;
+  if (r.name) $('#nameInput').value = r.name;
+  if (r.phone) $('#phoneInput').value = r.phone;
+  if (r.note) $('#noteInput').value = r.note;
+  if (r.confidence === 'low') $('#rawBox').open = true;
+  await findCandidates({ auto: state.settings.autoAdd && r.confidence !== 'low' });
 }
 
 function setGeoStatus(msg, err = false) {
@@ -449,7 +483,7 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
   if (next || stayOpen) {
     editing = null;
     resetForm();
-    if (next) $('#fileCamera').click(); // noch innerhalb der Nutzer-Geste (wichtig für iOS)
+    if (next) startCamera(); // noch innerhalb der Nutzer-Geste (wichtig für iOS)
     return;
   }
   dlg.close();
@@ -686,7 +720,9 @@ function navUrl(points) {
 
 function openNav(points) {
   if (!points.length) return toast(t('no_stops'));
-  window.open(navUrl(points), '_blank');
+  // In der Android-App öffnet Capacitor externe Links in der passenden App (Google Maps, Waze …)
+  if (IS_NATIVE) window.location.href = navUrl(points);
+  else window.open(navUrl(points), '_blank');
 }
 
 $('#btnOpenNav').addEventListener('click', () => {
@@ -740,9 +776,13 @@ $('#btnClearAll').addEventListener('click', () => {
 
 /* ---------------- Start ---------------- */
 
+if (NativeScanner) {
+  $('#photoEmpty b').dataset.i18n = 'scan_live';
+  $('#photoEmpty small').dataset.i18n = 'scan_live_hint';
+}
 setLang(state.settings.lang);
 render();
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+if (!IS_NATIVE && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 // für automatisierte Tests
