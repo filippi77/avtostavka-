@@ -393,3 +393,119 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .4); }
 .seg button.active[data-v="plus"], .seg button.active[data-v="express"] { background: var(--express); color: #fff; }
 .seg button.active[data-v="saver"] { background: var(--saver); color: #fff; }
 .service-field .hint { margin-top: 6px; }
+
+/* =====================================================================
+   Paketdienst-Theme: Braun + Gold, Karten im Stil eines Versandetiketts
+   ===================================================================== */
+:root {
+  --brand: #351c15;
+  --brand-2: #4b2a1d;
+  --gold: #ffb500;
+  --on-gold: #2a150f;
+  --bg: #f3eee8;
+  --surface: #ffffff;
+  --surface-2: #efe8e0;
+  --text: #1f130d;
+  --muted: #7b6a5e;
+  --line: rgba(53, 28, 21, .15);
+  --blue: #7a4a2a;              /* Links / sekundäre Aktionen */
+  --blue-soft: rgba(255, 181, 0, .2);
+  --green: #2e9e4f;
+  --green-text: #1f7a3b;
+  --orange: #ffb500;
+  --bar: #351c15;
+  --shadow: 0 1px 2px rgba(53, 28, 21, .06), 0 6px 18px rgba(53, 28, 21, .08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #120b08;
+    --surface: #1f1511;
+    --surface-2: #2c201a;
+    --text: #f6efe8;
+    --muted: #b4a398;
+    --line: rgba(255, 220, 190, .14);
+    --blue: #ffb500;
+    --blue-soft: rgba(255, 181, 0, .16);
+    --bar: #1a100c;
+    --shadow: none;
+  }
+}
+body { background: var(--bg); }
+
+/* Kopfzeile + Tab-Leiste in Braun */
+.topbar { background: var(--bar); border-bottom: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.topbar h1 { color: #fff; }
+.topbar .sub { color: rgba(255, 255, 255, .72); }
+.round-btn { background: rgba(255, 255, 255, .12); color: var(--gold); }
+.progress-line { background: rgba(255, 181, 0, .18); }
+.progress-line div { background: var(--gold); }
+.tabbar { background: var(--bar); border-top: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.tab { color: rgba(255, 255, 255, .6); }
+.tab.active, .tab.scan { color: var(--gold); }
+.scan-bubble { background: var(--gold); color: var(--on-gold); box-shadow: 0 6px 18px rgba(255, 181, 0, .45); border: 3px solid var(--bar); }
+
+/* Buttons */
+.btn { background: var(--blue-soft); color: var(--blue); }
+.btn.primary { background: var(--gold); color: var(--on-gold); }
+.btn.success { background: var(--green); color: #fff; }
+.btn.plain { background: transparent; color: var(--blue); }
+@media (prefers-color-scheme: dark) { .btn { color: var(--gold); } .btn.primary { color: var(--on-gold); } .btn.success { color: #fff; } }
+.badge { background: var(--brand); color: #fff; }
+@media (prefers-color-scheme: dark) { .badge { background: #5a3726; } }
+.install-hint { background: var(--blue-soft); }
+.install-hint svg { color: var(--blue); }
+.empty-icon { background: var(--blue-soft); color: var(--brand); }
+@media (prefers-color-scheme: dark) { .empty-icon { color: var(--gold); } }
+.switch input:checked + i { background: var(--gold); }
+.photo-drop { border-color: rgba(53, 28, 21, .35); background: var(--blue-soft); color: var(--blue); }
+.candidates input { accent-color: var(--brand); }
+.progress-bar div { background: var(--gold); }
+.raw summary { color: var(--blue); }
+.map-panel { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.map-fab { color: var(--brand); }
+@media (prefers-color-scheme: dark) { .map-fab { color: var(--gold); } }
+
+/* Nächster Stopp = Versandetikett */
+#nextWrap { margin-top: 14px; }
+.next-card { padding: 0; gap: 0; border: 2.5px solid var(--brand); border-radius: 14px; overflow: hidden; }
+@media (prefers-color-scheme: dark) { .next-card { border-color: #5a3726; } }
+.label-strip { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--brand); color: #fff; padding: 10px 12px 10px 14px; }
+.label-step { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+.label-step b { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--gold); color: var(--on-gold); font-size: 15px; letter-spacing: 0; }
+.svc-box { min-width: 64px; padding: 6px 8px; text-align: center; background: #000; color: #fff; font: 800 17px/1 ui-monospace, Menlo, monospace; border: 2px solid #fff; border-radius: 4px; letter-spacing: .02em; }
+.svc-box.svc-plus, .svc-box.svc-express { background: var(--express); }
+.svc-box.svc-saver { background: var(--saver); }
+.svc-box.svc-std { background: transparent; border-color: rgba(255, 255, 255, .5); color: rgba(255, 255, 255, .8); font-size: 14px; }
+.label-body { padding: 14px 16px 6px; display: grid; gap: 2px; }
+.label-tag { font: 700 11px/1 -apple-system, system-ui, sans-serif; letter-spacing: .14em; color: var(--muted); margin-bottom: 4px; }
+.label-body .who { font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; margin: 0; }
+.label-body .street { font-size: 25px; font-weight: 800; text-transform: uppercase; letter-spacing: -.01em; line-height: 1.15; }
+.label-body .city { font-size: 21px; font-weight: 800; color: var(--text); text-transform: uppercase; margin: 0; }
+.svc-line { margin-top: 6px; font-weight: 800; font-size: 15px; text-transform: uppercase; letter-spacing: .03em; }
+.svc-line.svc-plus, .svc-line.svc-express { color: var(--express); }
+.svc-line.svc-saver { color: var(--saver); }
+.label-track { margin: 8px 16px 4px; padding-top: 10px; border-top: 2px dashed var(--line); }
+.barcode { height: 34px; background:
+  repeating-linear-gradient(90deg, var(--text) 0 2px, transparent 2px 4px, var(--text) 4px 5px, transparent 5px 8px, var(--text) 8px 11px, transparent 11px 12px, var(--text) 12px 13px, transparent 13px 16px); opacity: .85; border-radius: 2px; }
+.trk { font: 600 13px/1.4 ui-monospace, Menlo, monospace; letter-spacing: .04em; margin-top: 6px; color: var(--text); }
+.next-actions { padding: 12px 14px 4px; }
+.next-more { padding: 0 8px 8px; }
+.next-card .chips { margin-top: 8px; }
+
+/* Liste */
+.svc-mini { display: inline-block; margin-right: 6px; padding: 1px 5px; border-radius: 3px; font: 800 11px/1.4 ui-monospace, Menlo, monospace; color: #fff; vertical-align: 2px; }
+.svc-mini.svc-plus, .svc-mini.svc-express { background: var(--express); }
+.svc-mini.svc-saver { background: var(--saver); }
+.trk-mini { font-family: ui-monospace, Menlo, monospace; font-size: 12px; opacity: .8; }
+.row.svc-plus, .row.svc-express, .row.svc-saver { background: transparent; box-shadow: inset 4px 0 0 var(--express); }
+.row.svc-saver { box-shadow: inset 4px 0 0 var(--saver); }
+.section-label .count { background: var(--brand); color: #fff; }
+
+/* Karte */
+.pin { background: var(--brand); }
+.pin.next { background: var(--gold); }
+.pin.next span { color: var(--on-gold); }
+.pin.delivered { background: var(--green); }
+.pin.next.svc-plus, .pin.next.svc-express { background: var(--express); }
+.pin.next.svc-saver { background: var(--saver); }
+.pin.next.svc-plus span, .pin.next.svc-express span, .pin.next.svc-saver span { color: #fff; }

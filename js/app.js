@@ -143,26 +143,33 @@ function render() {
 function chipsHtml(s) {
   const leg = state.route?.legsById?.[s.id];
   const chips = [];
-  if (isExpress(s)) chips.push(`<span class="chip svc-${s.service}">${esc(t('svc_chip_' + s.service))}</span>`);
-  if (s.tracking) chips.push(`<span class="chip mono">${esc(s.tracking.slice(0, 2))}…<b>${esc(s.tracking.slice(-4))}</b></span>`);
   if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
   if (leg) chips.push(`<span class="chip">${fmtDist(leg.distance)} · ${fmtTime(leg.duration)}</span>`);
   if (s.note) chips.push(`<span class="chip">${esc(s.note)}</span>`);
   return chips.length ? `<div class="chips">${chips.join('')}</div>` : '';
 }
 
+// Kurzcode der Servicestufe wie auf dem Etikett (Kästchen oben rechts)
+const SVC_CODE = { plus: '9:00', express: '12:00', saver: 'SAVER', '': 'STD' };
+const fmtTracking = (t) => t.replace(/^(1Z)(\w{3})(\w{3})(\w{2})(\w{4})(\w{4})$/i, '$1 $2 $3 $4 $5 $6');
+
 function nextCardHtml(s) {
   const { street, city } = splitAddr(s.address);
+  const svc = s.service || '';
   return `
-    <div class="next-head" data-id="${s.id}">
-      <div class="badge ${isExpress(s) ? 'svc-' + s.service : ''}">1</div>
-      <div>
-        <div class="street">${esc(street)}</div>
-        ${city ? `<div class="city">${esc(city)}</div>` : ''}
-        ${s.name ? `<div class="who">${esc(s.name)}</div>` : ''}
-        ${chipsHtml(s)}
-      </div>
+    <div class="label-strip">
+      <span class="label-step"><b>1</b> ${esc(t('next_stop'))}</span>
+      <span class="svc-box svc-${svc || 'std'}">${SVC_CODE[svc]}</span>
     </div>
+    <div class="label-body" data-id="${s.id}">
+      <div class="label-tag">SHIP TO</div>
+      ${s.name ? `<div class="who">${esc(s.name)}</div>` : ''}
+      <div class="street">${esc(street)}</div>
+      ${city ? `<div class="city">${esc(city)}</div>` : ''}
+      ${isExpress(s) ? `<div class="svc-line svc-${svc}">${esc(t('svc_chip_' + svc))}</div>` : ''}
+      ${chipsHtml(s)}
+    </div>
+    ${s.tracking ? `<div class="label-track"><div class="barcode" aria-hidden="true"></div><div class="trk">TRACKING #: ${esc(fmtTracking(s.tracking))}</div></div>` : ''}
     <div class="next-actions" data-id="${s.id}">
       ${hasPos(s)
         ? `<button class="btn primary" data-act="nav">${ICON.nav}<span>${t('navigate')}</span></button>`
@@ -208,8 +215,8 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
       <button class="row-main" data-act="toggle">
         <span class="badge">${badge}</span>
         <span class="row-text">
-          <span class="row-street" style="display:block">${isExpress(s) && isOpen(s) ? `<span class="xp svc-${s.service}">${s.service === 'plus' ? '⚡9' : s.service === 'saver' ? '⏱' : '⚡'}</span>` : ''}${esc(street)}</span>
-          <span class="row-sub" style="display:block">${hasPos(s) ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}</span>
+          <span class="row-street" style="display:block">${isExpress(s) && isOpen(s) ? `<span class="svc-mini svc-${s.service}">${SVC_CODE[s.service]}</span>` : ''}${esc(street)}</span>
+          <span class="row-sub" style="display:block">${hasPos(s) ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}${s.tracking ? ` <span class="trk-mini">…${esc(s.tracking.slice(-4))}</span>` : ''}</span>
         </span>
         ${leg && isOpen(s) ? `<span class="row-eta">${fmtDist(leg.distance)}<br>${fmtTime(leg.duration)}</span>` : ''}
         ${ICON.chev}
@@ -611,7 +618,10 @@ function renderMap() {
   });
   if (routeLine) { routeLine.remove(); routeLine = null; }
   if (state.route?.geometry?.length) {
-    routeLine = L.polyline(state.route.geometry, { color: '#007aff', weight: 6, opacity: 0.8, lineJoin: 'round' }).addTo(map);
+    routeLine = L.layerGroup([
+      L.polyline(state.route.geometry, { color: '#351c15', weight: 9, opacity: 0.85, lineJoin: 'round' }),
+      L.polyline(state.route.geometry, { color: '#ffb500', weight: 5, opacity: 1, lineJoin: 'round' }),
+    ]).addTo(map);
   }
   updateRouteInfo();
 }
