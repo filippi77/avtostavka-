@@ -568,3 +568,6 @@ body { background: var(--bg); }
 .all-route { width: 100%; margin-top: 10px; min-height: 52px; background: var(--surface); color: var(--text); border: 1.5px solid var(--line); }
 .all-route svg { color: var(--blue); }
 @media (prefers-color-scheme: dark) { .all-route { color: var(--gold); } }
+
+.help-link { margin-top: 4px; }
+#dlgSettings .help-link { text-decoration: none; }

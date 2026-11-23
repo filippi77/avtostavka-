@@ -169,6 +169,8 @@ const dict = {
     s_dwell: 'Als Aufenthalt zählen ab',
     all_google: 'Alle {n} Stopps in Google Maps',
     nav_first_n: '{app} übernimmt max. {n} Stopps – die nächsten {n} wurden übergeben',
+    help: 'Anleitung',
+    help_full: 'Anleitung mit Bildern',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -339,6 +341,8 @@ const dict = {
     s_dwell: 'Считать пребыванием от',
     all_google: 'Все {n} адр. в Google Maps',
     nav_first_n: '{app} принимает до {n} точек — переданы следующие {n}',
+    help: 'Инструкция (нем.)',
+    help_full: 'Инструкция с картинками (нем.)',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

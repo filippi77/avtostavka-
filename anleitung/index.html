@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delivery – Anleitung</title>
+  <meta name="description" content="Anleitung für die App Delivery: installieren, Pakete scannen, Route planen, zustellen">
+  <meta name="theme-color" content="#351c15">
+  <link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --brand: #351c15; --gold: #ffb500; --on-gold: #2a150f; --bg: #f3eee8; --surface: #fff;
+      --text: #1f130d; --muted: #6f5f54; --line: rgba(53, 28, 21, .15); --red: #e0352b; --green: #2e9e4f;
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; }
+    header { background: var(--brand); color: #fff; padding: 28px 16px 26px; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 0 16px; }
+    header .wrap { padding: 0; display: flex; gap: 16px; align-items: center; }
+    header img { width: 64px; height: 64px; border-radius: 15px; flex: none; }
+    h1 { margin: 0; font-size: 30px; line-height: 1.15; }
+    header p { margin: 4px 0 0; color: rgba(255,255,255,.78); }
+    nav.toc { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+    nav.toc .wrap { display: flex; gap: 6px; overflow-x: auto; padding: 10px 16px; scrollbar-width: none; }
+    nav.toc a { flex: none; text-decoration: none; color: var(--brand); background: rgba(255,181,0,.2); padding: 6px 12px; border-radius: 999px; font-size: 15px; font-weight: 600; }
+    main { padding: 8px 0 40px; }
+    section { padding-top: 28px; }
+    h2 { font-size: 24px; margin: 0 0 12px; display: flex; align-items: center; gap: 10px; }
+    h2 .n { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--gold); color: var(--on-gold); font-size: 18px; flex: none; }
+    h3 { font-size: 19px; margin: 18px 0 6px; }
+    .card { background: var(--surface); border-radius: 18px; padding: 18px; box-shadow: 0 1px 2px rgba(53,28,21,.06), 0 6px 18px rgba(53,28,21,.07); }
+    .step { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 22px; align-items: start; }
+    .step + .step { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--line); }
+    .shot { width: 250px; border-radius: 26px; border: 6px solid #1b120e; box-shadow: 0 8px 24px rgba(0,0,0,.18); display: block; background: #fff; }
+    .shots2 { display: flex; gap: 12px; }
+    .shots2 .shot { width: 200px; }
+    ol, ul { padding-left: 22px; margin: 6px 0; }
+    li { margin: 4px 0; }
+    .btn { display: inline-block; background: var(--gold); color: var(--on-gold); font-weight: 700; padding: 1px 8px; border-radius: 7px; white-space: nowrap; }
+    .btn.g { background: var(--green); color: #fff; }
+    .btn.o { background: #fff0db; color: #b04300; }
+    .btn.b { background: var(--brand); color: #fff; }
+    .tag { display: inline-block; font: 800 13px/1.5 ui-monospace, Menlo, monospace; color: #fff; background: #000; padding: 0 6px; border-radius: 4px; }
+    .tag.r { background: var(--red); } .tag.p { background: #af52de; }
+    .tip { background: #fff7e0; border-left: 4px solid var(--gold); padding: 10px 14px; border-radius: 10px; margin: 12px 0 0; font-size: 16px; }
+    .warn { background: #fff0ec; border-left-color: var(--red); }
+    .platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .qr { display: flex; gap: 18px; align-items: center; }
+    .qr img { width: 170px; border-radius: 14px; flex: none; }
+    a { color: #8a4b12; }
+    code, .url { font-family: ui-monospace, Menlo, monospace; font-size: 15px; background: rgba(53,28,21,.07); padding: 1px 6px; border-radius: 5px; word-break: break-all; }
+    table { border-collapse: collapse; width: 100%; font-size: 16px; }
+    td, th { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    footer { color: var(--muted); font-size: 14px; text-align: center; padding: 10px 16px 40px; }
+    @media (max-width: 700px) {
+      .step { grid-template-columns: 1fr; }
+      .shot { margin: 0 auto; width: min(260px, 80vw); }
+      .shots2 { justify-content: center; }
+      .shots2 .shot { width: min(170px, 42vw); }
+      .platforms { grid-template-columns: 1fr; }
+      .qr { flex-direction: column; text-align: center; }
+      h1 { font-size: 26px; }
+    }
+    @media print {
+      @page { size: A4; margin: 12mm; }
+      body { background: #fff; font-size: 12.5pt; }
+      nav.toc { display: none; }
+      header { -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 18px; border-radius: 12px; }
+      section { break-inside: auto; padding-top: 16px; }
+      .step { break-inside: avoid; grid-template-columns: minmax(0, 1fr) 200px; }
+      .shot { width: 200px; }
+      .card { box-shadow: none; border: 1px solid #ddd; }
+      .btn, .tag, h2 .n, .tip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .pb { break-before: page; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <img src="../icons/icon-192.png" alt="">
+      <div>
+        <h1>Delivery – Anleitung</h1>
+        <p>Etiketten scannen · Route planen · zustellen</p>
+      </div>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Inhalt">
+    <div class="wrap">
+      <a href="#installieren">1 Installieren</a>
+      <a href="#erfassen">2 Pakete erfassen</a>
+      <a href="#route">3 Route</a>
+      <a href="#zustellen">4 Zustellen</a>
+      <a href="#touren">5 Touren &amp; Verlauf</a>
+      <a href="#einstellungen">6 Einstellungen</a>
+      <a href="#probleme">7 Tipps &amp; Probleme</a>
+    </div>
+  </nav>
+
+  <main class="wrap">
+
+    <section id="installieren">
+      <h2><span class="n">1</span>App installieren</h2>
+      <div class="card">
+        <div class="qr">
+          <img src="img/qr.png" alt="QR-Code zur App">
+          <div>
+            <p style="margin-top:0">Delivery ist eine Web-App – kein App Store nötig. Mit der Handykamera den QR-Code scannen oder diese Adresse öffnen:</p>
+            <p><span class="url">filippi77.github.io/avtostavka-/</span></p>
+            <p style="margin-bottom:0">Danach die App einmal zum Home-Bildschirm hinzufügen. Sie startet dann wie jede andere App im Vollbild.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="platforms" style="margin-top:14px">
+        <div class="card">
+          <h3 style="margin-top:0">📱 iPhone</h3>
+          <ol>
+            <li>Link in <b>Safari</b> öffnen (nicht in Chrome).</li>
+            <li>Unten auf <b>Teilen</b> tippen (Quadrat mit Pfeil nach oben; bei neuem iOS erst auf <b>⋯</b>).</li>
+            <li><b>„Zum Home-Bildschirm“</b> → <b>„Hinzufügen“</b>.</li>
+            <li>Ab jetzt <b>Delivery</b> über das Icon starten.</li>
+          </ol>
+          <p class="tip">Die App zeigt beim ersten Öffnen in Safari selbst einen Hinweis dazu.</p>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">🤖 Android</h3>
+          <p style="margin:0 0 4px"><b>Variante A – mit Live-Scanner (empfohlen):</b></p>
+          <ol>
+            <li><span class="url">github.com/filippi77/avtostavka-/releases/latest</span> öffnen.</li>
+            <li>Datei <b>delivery-….apk</b> herunterladen und öffnen.</li>
+            <li>Installation aus dieser Quelle erlauben → <b>Installieren</b>.</li>
+          </ol>
+          <p style="margin:10px 0 4px"><b>Variante B – ohne Download:</b> Link in Chrome öffnen → Menü <b>⋮</b> → <b>„App installieren“</b>.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">Beim ersten Start</h3>
+            <ul>
+              <li><b>Standort erlauben</b> – für die Route ab deiner Position, Adressvorschläge in der Nähe und „Vor Ort“.</li>
+              <li><b>Kamera erlauben</b> – beim ersten Scan.</li>
+              <li>Die erste Texterkennung dauert etwas länger (ca. 15 MB werden geladen, am besten im WLAN). Danach geht es schnell.</li>
+            </ul>
+            <p class="tip">Die App ist auf Deutsch. Russisch: ⚙ → <b>Sprache der App</b>.</p>
+          </div>
+          <img class="shot" src="img/01-start.jpg" alt="Startbildschirm der App">
+        </div>
+      </div>
+    </section>
+
+    <section id="erfassen">
+      <h2><span class="n">2</span>Pakete erfassen</h2>
+      <div class="card">
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">a) Etikett scannen</h3>
+            <ol>
+              <li>Unten auf <span class="btn">Scannen</span> tippen.</li>
+              <li><b>Adressfeld groß, gerade und scharf</b> fotografieren.</li>
+              <li>Die App erkennt <b>Adresse, Empfänger, Telefon</b>, die <b>Servicestufe</b> (Express Plus / Express / Saver) und die <b>Sendungsnummer 1Z…</b>. Der Absender wird ignoriert.</li>
+              <li>Adresse prüfen → <span class="btn">Hinzufügen</span>.<br>Mit <b>„Hinzufügen &amp; nächstes“</b> öffnet sich sofort die Kamera für das nächste Paket.</li>
+            </ol>
+            <p class="tip"><b>Android-App:</b> Der Scanner liest live im Kamerabild. Rahmen wird <b>grün</b>, Handy vibriert – Adresse wird automatisch übernommen. ⚡ = Taschenlampe.</p>
+          </div>
+          <img class="shot" src="img/03-scan.jpg" alt="Gescanntes UPS-Etikett">
+        </div>
+
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">b) Servicestufe (Express)</h3>
+            <p>Unten im Formular steht die Servicestufe. Sie wird vom Etikett übernommen, kann aber angetippt werden:</p>
+            <table>
+              <tr><td><span class="tag r">9:00</span></td><td><b>Express Plus</b> – kommt in der Route ganz nach vorne</td></tr>
+              <tr><td><span class="tag r">12:00</span></td><td><b>Express</b> – danach</td></tr>
+              <tr><td><span class="tag p">SAVER</span></td><td><b>Express Saver</b> – danach</td></tr>
+              <tr><td><span class="tag">STD</span></td><td><b>Standard</b> – zum Schluss</td></tr>
+            </table>
+          </div>
+          <img class="shot" src="img/04-service.jpg" alt="Auswahl der Servicestufe">
+        </div>
+
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">c) Adresse eintippen</h3>
+            <ol>
+              <li><b>„Adresse eingeben“</b> bzw. <b>„+ Adresse manuell eingeben“</b>.</li>
+              <li>Ein paar Buchstaben tippen – es erscheinen <b>Straßen im Umkreis von 50 km</b>, die nächsten zuerst.</li>
+              <li>Straße antippen → <b>Hausnummer</b> tippen → das Haus antippen → <span class="btn">Hinzufügen</span>.</li>
+            </ol>
+            <p class="tip">Kein Treffer? Adresse komplett eintippen und <b>„Adresse suchen“</b>.</p>
+          </div>
+          <img class="shot" src="img/06-eingabe.jpg" alt="Adressvorschläge beim Tippen">
+        </div>
+
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">d) Adressbuch – häufige Adressen</h3>
+            <p>Jede Adresse wird <b>gemerkt</b> – mit Empfänger, Telefon, Notiz und Position. Beim Tippen erscheinen gespeicherte Adressen <b>zuerst mit ★</b> und wie oft du dort warst („9×“). Sofort, auch ohne Internet.</p>
+            <p>Feld leer lassen und antippen → die <b>häufigsten Adressen</b> erscheinen.</p>
+          </div>
+          <img class="shot" src="img/07-adressbuch.jpg" alt="Gespeicherte Adressen mit Stern">
+        </div>
+      </div>
+    </section>
+
+    <section id="route" class="pb">
+      <h2><span class="n">3</span>Route planen</h2>
+      <div class="card">
+        <div class="step">
+          <div>
+            <p style="margin-top:0">Wenn alle Pakete erfasst sind, oben auf das <b>Routen-Symbol</b> (geschwungene Linie) tippen oder auf der Karte <span class="btn">Optimieren</span>.</p>
+            <ul>
+              <li>Die App berechnet die <b>schnellste Reihenfolge</b> ab deinem Standort – nach echter Fahrzeit.</li>
+              <li><b>Express-Pakete kommen immer zuerst</b> (9:00 → 12:00 → Saver → Standard).</li>
+              <li>Die Stopps werden neu nummeriert, mit Entfernung und Fahrzeit.</li>
+              <li>Reihenfolge von Hand ändern: Stopp in der Liste antippen → ↑ / ↓.</li>
+            </ul>
+            <p class="tip">Neue Pakete dazugekommen? Einfach noch einmal optimieren.</p>
+          </div>
+          <img class="shot" src="img/08-karte.jpg" alt="Karte mit Route">
+        </div>
+      </div>
+    </section>
+
+    <section id="zustellen" class="pb">
+      <h2><span class="n">4</span>Zustellen</h2>
+      <div class="card">
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">Der nächste Stopp</h3>
+            <p>Oben steht immer der <b>nächste Stopp</b> wie ein Etikett: Empfänger, Adresse, Servicestufe und Sendungsnummer.</p>
+            <ul>
+              <li><span class="btn">Navigieren</span> – öffnet die Navi-App mit diesem Stopp.</li>
+              <li><span class="btn g">✓ Zugestellt</span> – Stopp erledigt, der nächste rückt nach.</li>
+              <li><span class="btn o">Nicht angetroffen</span> – kommt unter „Erledigt“ und kann später zurückgeholt werden.</li>
+              <li>Darunter: <b>Anrufen</b>, <b>Auf Karte</b>, <b>Express</b> an/aus, <b>Bearbeiten</b>.</li>
+            </ul>
+          </div>
+          <img class="shot" src="img/02-tour.jpg" alt="Nächster Stopp als Etikett">
+        </div>
+
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">Ganze Tour in Google Maps</h3>
+            <p><b>„Alle … Stopps in Google Maps“</b> übergibt die offenen Stopps in der optimierten Reihenfolge – bis zu <b>10 Stopps</b> auf einmal (Grenze von Google). Danach wieder drücken für die nächsten 10.</p>
+            <p>Stopp in der Liste antippen → weitere Aktionen (Route, Zugestellt, Nicht da, ↑ ↓, Express, Bearbeiten, Löschen).</p>
+          </div>
+          <img class="shot" src="img/05-liste.jpg" alt="Liste mit geöffnetem Stopp">
+        </div>
+
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">Navi-App wählen</h3>
+            <p>Unter ⚙ → <b>Navigations-App</b>: Apple Karten, Google Maps, Waze, TomTom GO, HERE WeGo, Sygic, Yandex Navi – oder <b>„Jedes Mal fragen“</b>. Dann erscheint diese Auswahl, auf Wunsch mit „Als Standard merken“.</p>
+            <p class="tip">Die gewählte App muss auf dem Handy installiert sein.</p>
+          </div>
+          <img class="shot" src="img/09-navi.jpg" alt="Auswahl der Navi-App">
+        </div>
+
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">„Vor Ort“</h3>
+            <p>Bist du länger als <b>30 Sekunden</b> an einer Adresse der Tour und die App ist geöffnet, erscheint <b>📍 Vor Ort seit …</b>. Der Aufenthalt wird im Verlauf gespeichert.</p>
+            <p><b>Zugestellt</b> und <b>Nicht angetroffen</b> werden mit Uhrzeit und Position festgehalten.</p>
+            <p class="tip">Während du in der Navi-App bist, pausiert die Aufzeichnung. Zurück in Delivery geht es weiter.</p>
+          </div>
+          <img class="shot" src="img/15-vorort.jpg" alt="Vor Ort an einer Adresse">
+        </div>
+      </div>
+    </section>
+
+    <section id="touren" class="pb">
+      <h2><span class="n">5</span>Touren, Verlauf &amp; Sicherung</h2>
+      <div class="card">
+        <div class="step">
+          <div>
+            <p style="margin-top:0">Oben auf das <b>Kisten-Symbol</b> tippen.</p>
+            <ul>
+              <li>Jede Tour wird <b>täglich automatisch gesichert</b> („Heute“, „Gestern“, … – 30 Tage).</li>
+              <li><b>Eigener Name</b> (z. B. „Montag – Tour A“) → <span class="btn">Aktuelle Tour speichern</span>.</li>
+              <li><span class="btn">Laden</span> ersetzt die aktuelle Tour, <b>+</b> fügt die Stopps hinzu. Status, Express und Sendungsnummern werden dabei zurückgesetzt.</li>
+            </ul>
+            <p class="tip">Typischer Morgen: Touren → „Montag – Tour A“ → Laden → neue Pakete scannen → Optimieren.</p>
+          </div>
+          <img class="shot" src="img/11-touren.jpg" alt="Gespeicherte Touren">
+        </div>
+        <div class="step">
+          <div>
+            <h3 style="margin-top:0">Verlauf</h3>
+            <p>Im selben Fenster unter <b>Verlauf</b>: Aufenthalte, Zustellungen und „nicht angetroffen“ – pro Tag, mit Uhrzeit und Abstand zur Adresse. <b>„Verlauf als Tabelle (CSV) teilen“</b> erzeugt eine Excel-Tabelle.</p>
+            <h3>Sicherung</h3>
+            <p>Alle Daten liegen <b>nur auf deinem Handy</b>. Mit <b>„Sicherung exportieren“</b> als Datei speichern (Dateien, Mail) – z. B. vor einem Handywechsel. <b>„Sicherung laden“</b> stellt sie wieder her.</p>
+          </div>
+          <img class="shot" src="img/12-verlauf.jpg" alt="Verlauf des Tages">
+        </div>
+      </div>
+    </section>
+
+    <section id="einstellungen" class="pb">
+      <h2><span class="n">6</span>Einstellungen ⚙</h2>
+      <div class="card">
+        <div class="step">
+          <div>
+            <table>
+              <tr><th>Sprache der App</th><td>Deutsch / Русский</td></tr>
+              <tr><th>Sprache der Etiketten</th><td>Deutsch, Deutsch + Russisch, Russisch</td></tr>
+              <tr><th>Standard-Ort</th><td>Wird ergänzt, wenn auf dem Etikett kein Ort steht</td></tr>
+              <tr><th>Suchradius</th><td>10 / 25 / 50 / 100 km für Adressvorschläge</td></tr>
+              <tr><th>Start der Route</th><td>Mein Standort (GPS) oder erster Stopp</td></tr>
+              <tr><th>Navigations-App</th><td>siehe Kapitel 4</td></tr>
+              <tr><th>Express Saver vor Standard</th><td>aus = Saver wie Standard</td></tr>
+              <tr><th>Aufenthalte aufzeichnen</th><td>„Vor Ort“ an/aus, ab 30 s / 1 min / 2 min</td></tr>
+            </table>
+          </div>
+          <div class="shots2">
+            <img class="shot" src="img/13-einstellungen.jpg" alt="Einstellungen oben">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="probleme" class="pb">
+      <h2><span class="n">7</span>Tipps &amp; Probleme</h2>
+      <div class="card">
+        <table>
+          <tr><th>Adresse falsch erkannt</th><td>Im Formular korrigieren. Unter „Erkannter Text“ steht alles, was die Kamera gelesen hat. Näher, gerader und mit Licht fotografieren.</td></tr>
+          <tr><th>Punkt auf der Karte liegt falsch</th><td>Auf der Karte den Marker gedrückt halten und zum richtigen Haus <b>ziehen</b>. Die App merkt sich die Korrektur für das nächste Mal.</td></tr>
+          <tr><th>„Hausnummer nicht auf der Karte“</th><td>Die Hausnummer fehlt in OpenStreetMap. Apple Karten, Google Maps und Waze bekommen dann die Adresse als Text und finden das Haus selbst. Für TomTom &amp; Co. den Marker ziehen.</td></tr>
+          <tr><th>App zeigt alte Version</th><td>App schließen (nach oben wischen) und neu öffnen – bei Bedarf zweimal.</td></tr>
+          <tr><th>Kein Standort / „GPS nicht verfügbar“</th><td>iPhone: Einstellungen → Datenschutz → Ortungsdienste → Safari-Websites → „Beim Verwenden“. Android: Standort für Chrome bzw. Delivery erlauben.</td></tr>
+          <tr><th>Handy gewechselt / App gelöscht</th><td>Vorher <b>„Sicherung exportieren“</b>, auf dem neuen Handy <b>„Sicherung laden“</b>. Beim Löschen des Icons löscht das iPhone auch die Daten.</td></tr>
+          <tr><th>Akku</th><td>Bei geöffneter App ist GPS aktiv. „Aufenthalte aufzeichnen“ kann in den Einstellungen ausgeschaltet werden.</td></tr>
+        </table>
+        <p class="tip warn"><b>Datenschutz:</b> Adressen, Telefonnummern und Verlauf bleiben auf deinem Handy. Kundendaten (z. B. Sicherungsdateien) nicht über private Chats weitergeben.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>Delivery – Hilfe für Zusteller · Kein offizielles Produkt eines Paketdienstes · Karten © OpenStreetMap-Mitwirkende</footer>
+</body>
+</html>
