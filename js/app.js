@@ -144,6 +144,10 @@ function render() {
   // Nächster Stopp
   const next = pending[0];
   $('#nextWrap').hidden = !next;
+  // ganze Tour auf einmal an Google Maps (bis 10 Stopps)
+  const routable = pending.filter(hasPos).length;
+  $('#btnAllGoogle').hidden = routable < 2;
+  $('#allGoogleLabel').textContent = t('all_google', { n: Math.min(routable, 10) });
   if (next) $('#nextCard').innerHTML = nextCardHtml(next);
 
   // Weitere Stopps
@@ -1074,7 +1078,7 @@ const navName = (app) => (app === 'geo' ? t('nav_geo') : app === 'ask' ? t('nav_
 
 function openNavWith(app, points) {
   const { url, count, coordsOnly } = navLink(app, points, { exact: useCoords, address: navAddress });
-  if (points.length > count) toast(t('single_dest', { app: navName(app) }), 3500);
+  if (points.length > count) toast(count > 1 ? t('nav_first_n', { app: navName(app), n: count }) : t('single_dest', { app: navName(app) }), 4000);
   else if (coordsOnly && !useCoords(points[0])) toast(t('nav_coords_hint'), 4500);
   window.__lastNav = url; // für automatisierte Tests
   // App-Schemata (tomtomgo:, geo: …) und die Android-App: direkt aufrufen; Webseiten im neuen Tab
@@ -1100,6 +1104,10 @@ $('#navGrid').addEventListener('click', (e) => {
   if ($('#navRemember').checked) { state.settings.nav = b.dataset.app; save(); }
   $('#dlgNav').close();
   openNavWith(b.dataset.app, navPending);
+});
+
+$('#btnAllGoogle').addEventListener('click', () => {
+  openNavWith('google', state.stops.filter((s) => isOpen(s) && hasPos(s)));
 });
 
 $('#btnOpenNav').addEventListener('click', () => {

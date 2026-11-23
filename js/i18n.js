@@ -167,6 +167,8 @@ const dict = {
     s_track: 'Aufenthalte an Adressen aufzeichnen',
     s_track_hint: 'Nur solange die App geöffnet ist. Daten bleiben auf dem Handy.',
     s_dwell: 'Als Aufenthalt zählen ab',
+    all_google: 'Alle {n} Stopps in Google Maps',
+    nav_first_n: '{app} übernimmt max. {n} Stopps – die nächsten {n} wurden übergeben',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -335,6 +337,8 @@ const dict = {
     s_track: 'Записывать пребывание на адресах',
     s_track_hint: 'Только пока приложение открыто. Данные остаются на телефоне.',
     s_dwell: 'Считать пребыванием от',
+    all_google: 'Все {n} адр. в Google Maps',
+    nav_first_n: '{app} принимает до {n} точек — переданы следующие {n}',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

@@ -563,3 +563,8 @@ body { background: var(--bg); }
 .h-ok { color: var(--green-text); font-weight: 600; }
 .h-fail { color: var(--orange-text); font-weight: 600; }
 #btnHistCsv { width: 100%; }
+
+/* Ganze Tour an Google Maps */
+.all-route { width: 100%; margin-top: 10px; min-height: 52px; background: var(--surface); color: var(--text); border: 1.5px solid var(--line); }
+.all-route svg { color: var(--blue); }
+@media (prefers-color-scheme: dark) { .all-route { color: var(--gold); } }
