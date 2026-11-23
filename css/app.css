@@ -529,3 +529,4 @@ body { background: var(--bg); }
 }
 #map { background: #e9e4dc; }
 @media (prefers-color-scheme: dark) { #map { background: #1b1714; } }
+.candidates .warn { color: var(--orange-text); font-size: 13px; }

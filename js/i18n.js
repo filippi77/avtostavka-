@@ -122,6 +122,8 @@ const dict = {
     enter_number: 'Hausnummer eingeben…',
     no_suggest: 'Keine Treffer im Umkreis von {r} km – „Adresse suchen“ tippen',
     s_radius: 'Suchradius für Adressen',
+    street_only: 'Hausnummer nicht auf der Karte – Navi sucht per Adresse',
+    street_only_short: 'nur Straße gefunden, Hausnummer nicht auf der Karte',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -245,6 +247,8 @@ const dict = {
     enter_number: 'Введите номер дома…',
     no_suggest: 'Ничего в радиусе {r} км — нажмите «Найти адрес»',
     s_radius: 'Радиус поиска адресов',
+    street_only: 'Дома нет на карте — навигатор ищет по адресу',
+    street_only_short: 'найдена только улица, дома нет на карте',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

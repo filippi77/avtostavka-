@@ -20,6 +20,9 @@ export function prepareQuery(q) {
     .trim();
 }
 
+// Nur echte Straßen (keine Bushaltestellen, Ampeln, Wege-Punkte …)
+const ROAD_TYPES = new Set(['residential', 'primary', 'secondary', 'tertiary', 'unclassified', 'living_street', 'service', 'pedestrian', 'trunk', 'road', 'primary_link', 'secondary_link', 'tertiary_link', 'track', 'busway', 'cycleway', 'footway', 'path']);
+
 /** Photon-Feature → Vorschlag */
 export function toSuggestion(f, center) {
   const p = f.properties || {};
@@ -32,14 +35,17 @@ export function toSuggestion(f, center) {
   if (p.housenumber && (p.street || p.name)) {
     kind = 'house';
     main = `${p.street || p.name} ${p.housenumber}`;
-  } else if (p.osm_key === 'highway' || p.type === 'street') {
+  } else if (p.type === 'street' || (p.osm_key === 'highway' && ROAD_TYPES.has(p.osm_value))) {
     kind = 'street';
     main = p.name || p.street || '';
+  } else if (p.osm_key === 'highway' || p.osm_key === 'public_transport' || p.osm_key === 'railway') {
+    return null; // Haltestellen, Kreuzungen usw. sind keine Lieferadressen
   } else if (p.street) {
     // benanntes Objekt (Firma, Geschäft) mit Adresse
     main = p.name ? `${p.name}, ${p.street}${p.housenumber ? ' ' + p.housenumber : ''}` : p.street;
   }
   if (!main) return null;
+  if (kind === 'place' && !p.street) return null; // Orte/POIs ohne Straße sind keine Lieferadresse
   const address = [kind === 'place' && p.street ? `${p.street}${p.housenumber ? ' ' + p.housenumber : ''}` : main, plzCity]
     .filter(Boolean)
     .join(', ');

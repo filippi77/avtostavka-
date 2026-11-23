@@ -28,10 +28,10 @@ test('Abkürzungen in der Eingabe', () => {
 
 test('Vorschläge: nur im Umkreis, nächste zuerst, Straßen und Häuser', async () => {
   const calls = mockFetch([
-    feat({ osm_key: 'highway', name: 'Hauptstraße', postcode: '10827', city: 'Berlin', district: 'Schöneberg' }, 52.488, 13.357),
-    feat({ osm_key: 'highway', name: 'Hauptstraße', postcode: '14469', city: 'Potsdam' }, 52.41, 13.03),
-    feat({ osm_key: 'highway', name: 'Hauptstraße', postcode: '80331', city: 'München' }, 48.137, 11.575), // 500 km weg
-    feat({ osm_key: 'highway', name: 'Hauptstraße', postcode: '10827', city: 'Berlin', district: 'Schöneberg' }, 52.488, 13.357), // Dublette
+    feat({ osm_key: 'highway', osm_value: 'residential', name: 'Hauptstraße', postcode: '10827', city: 'Berlin', district: 'Schöneberg' }, 52.488, 13.357),
+    feat({ osm_key: 'highway', osm_value: 'residential', name: 'Hauptstraße', postcode: '14469', city: 'Potsdam' }, 52.41, 13.03),
+    feat({ osm_key: 'highway', osm_value: 'residential', name: 'Hauptstraße', postcode: '80331', city: 'München' }, 48.137, 11.575), // 500 km weg
+    feat({ osm_key: 'highway', osm_value: 'residential', name: 'Hauptstraße', postcode: '10827', city: 'Berlin', district: 'Schöneberg' }, 52.488, 13.357), // Dublette
   ]);
   const r = await suggest('Hauptstr', { center, radiusKm: 50 });
   assert.equal(r.length, 2);
@@ -47,7 +47,7 @@ test('Vorschläge: nur im Umkreis, nächste zuerst, Straßen und Häuser', async
 
 test('Mit Hausnummer: Häuser vor Straßen', async () => {
   mockFetch([
-    feat({ osm_key: 'highway', name: 'Torstraße', postcode: '10119', city: 'Berlin' }, 52.529, 13.401),
+    feat({ osm_key: 'highway', osm_value: 'residential', name: 'Torstraße', postcode: '10119', city: 'Berlin' }, 52.529, 13.401),
     feat({ osm_key: 'building', street: 'Torstraße', housenumber: '101', postcode: '10119', city: 'Berlin' }, 52.5291, 13.4015),
   ]);
   const r = await suggest('Torstraße 101', { center, radiusKm: 50 });
@@ -69,4 +69,17 @@ test('Genaue Hausnummer vor ähnlichen (12 vor 12A)', async () => {
   ]);
   const r = await suggest('Hauptstraße 12, 10827 Berlin', { center, radiusKm: 50 });
   assert.equal(r[0].main, 'Hauptstraße 12');
+});
+
+test('Bushaltestellen und Orte ohne Straße werden ausgefiltert', async () => {
+  mockFetch([
+    feat({ osm_key: 'highway', osm_value: 'bus_stop', name: 'Elsenborner Straße', city: 'Berlin' }, 52.52, 13.40),
+    feat({ osm_key: 'public_transport', osm_value: 'platform', name: 'Elsenborner Str.', city: 'Berlin' }, 52.52, 13.40),
+    feat({ osm_key: 'place', osm_value: 'locality', name: 'Elsenborn' }, 52.52, 13.40),
+    feat({ osm_key: 'highway', osm_value: 'residential', name: 'Elsenborner Straße', postcode: '10115', city: 'Berlin' }, 52.521, 13.401),
+  ]);
+  const r = await suggest('Elsenborner', { center, radiusKm: 50 });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].kind, 'street');
+  assert.equal(r[0].address, 'Elsenborner Straße, 10115 Berlin');
 });

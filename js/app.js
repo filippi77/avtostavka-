@@ -147,6 +147,7 @@ function chipsHtml(s) {
   const leg = state.route?.legsById?.[s.id];
   const chips = [];
   if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
+  else if (s.precision === 'street') chips.push(`<span class="chip warn">⚠ ${esc(t('street_only'))}</span>`);
   if (leg) chips.push(`<span class="chip">${fmtDist(leg.distance)} · ${fmtTime(leg.duration)}</span>`);
   if (s.note) chips.push(`<span class="chip">${esc(s.note)}</span>`);
   return chips.length ? `<div class="chips">${chips.join('')}</div>` : '';
@@ -545,7 +546,7 @@ function pickSuggestion(i) {
   pickedAddress = x.address;
   input.value = x.address;
   input.blur();
-  candidates = [{ lat: x.lat, lon: x.lon, label: x.address + (x.sub && !x.address.includes(x.sub) ? ' · ' + x.sub : '') }];
+  candidates = [{ lat: x.lat, lon: x.lon, label: x.address, precision: x.kind === 'house' ? 'house' : 'street', postcode: x.postcode, city: x.city }];
   $('#candidates').innerHTML = `<li><label><input type="radio" name="cand" value="0" checked><span>${esc(x.address)}${x.dist != null ? ` · ${fmtDist(x.dist)}` : ''}</span></label></li>`;
   setGeoStatus(t('found_one'));
   setAddEnabled(true);
@@ -592,7 +593,7 @@ async function findCandidates({ auto = false } = {}) {
   if (!candidates.length) return setGeoStatus(t('not_found'), true);
   setGeoStatus(candidates.length === 1 ? t('found_one') : t('found_many', { n: candidates.length }));
   $('#candidates').innerHTML = candidates
-    .map((c, i) => `<li><label><input type="radio" name="cand" value="${i}" ${i === 0 ? 'checked' : ''}><span>${esc(c.label)}</span></label></li>`)
+    .map((c, i) => `<li><label><input type="radio" name="cand" value="${i}" ${i === 0 ? 'checked' : ''}><span>${esc(c.label)}${c.precision === 'street' ? `<br><small class="warn">⚠ ${esc(t('street_only_short'))}</small>` : ''}</span></label></li>`)
     .join('');
   setAddEnabled(true);
   if (auto && candidates.length === 1) commitAdd({ stayOpen: true });
@@ -608,10 +609,12 @@ $('#addrInput').addEventListener('keydown', (e) => {
 });
 
 function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {}) {
-  const address = $('#addrInput').value.trim().replace(/\s*\n\s*/g, ', ');
+  let address = $('#addrInput').value.trim().replace(/\s*\n\s*/g, ', ');
   if (!address) return setGeoStatus(t('enter_address'), true);
   const sel = document.querySelector('input[name="cand"]:checked');
   const c = !withoutCoords && sel ? candidates[+sel.value] : null;
+  // PLZ + Ort ergänzen, wenn nur "Straße Nr." eingegeben wurde (wichtig für die Navigation)
+  if (c?.postcode && c?.city && !/(^|\D)\d{4,5}\s+\p{L}/u.test(address)) address = `${address}, ${c.postcode} ${c.city}`;
   const data = {
     address,
     name: $('#nameInput').value.trim(),
@@ -626,11 +629,11 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
   if (editing) {
     const oldPrio = prioOf(editing);
     stop = Object.assign(editing, data);
-    if (c) { stop.lat = c.lat; stop.lon = c.lon; stop.geoLabel = c.label; }
+    if (c) { stop.lat = c.lat; stop.lon = c.lon; stop.geoLabel = c.label; stop.precision = c.precision || ''; }
     if (oldPrio !== prioOf(stop)) placeStop(stop);
   } else {
     if (state.stops.some((s) => s.address.toLowerCase() === address.toLowerCase()) && !confirm(t('duplicate'))) return;
-    stop = { id: uid(), ...data, lat: c?.lat ?? null, lon: c?.lon ?? null, geoLabel: c?.label || '', status: 'pending', createdAt: Date.now() };
+    stop = { id: uid(), ...data, lat: c?.lat ?? null, lon: c?.lon ?? null, geoLabel: c?.label || '', precision: c?.precision || '', status: 'pending', createdAt: Date.now() };
     placeStop(stop);
   }
   invalidateRoute();
@@ -739,6 +742,7 @@ function renderMap() {
       const p = m.getLatLng();
       s.lat = p.lat;
       s.lon = p.lng;
+      s.precision = 'manual';
       invalidateRoute();
       save();
       render();
@@ -830,6 +834,7 @@ async function onMapClick(e) {
   if (!s) return;
   s.lat = e.latlng.lat;
   s.lon = e.latlng.lng;
+  s.precision = 'manual';
   invalidateRoute();
   save();
   render();
@@ -889,15 +894,38 @@ $('#btnOptimizeTop').addEventListener('click', optimize);
 
 const NAV_NAMES = { apple: 'Apple Karten', google: 'Google Maps', waze: 'Waze' };
 
+/**
+ * Ziel für die Navigations-App:
+ * genaues Haus oder von Hand gesetzter Punkt → Koordinaten;
+ * sonst (nur Straße gefunden, alte Einträge) → Adresse als Text, die Navi-App sucht das Haus selbst.
+ */
+function useCoords(s) {
+  return s.precision === 'house' || s.precision === 'manual';
+}
+function navAddress(s) {
+  let a = s.address;
+  if (!/(^|\D)\d{4,5}\s+\p{L}/u.test(a) && state.settings.city && !a.toLowerCase().includes(state.settings.city.toLowerCase())) a += ', ' + state.settings.city;
+  return a;
+}
+const navDest = (s) => (useCoords(s) ? `${s.lat},${s.lon}` : navAddress(s));
+
 function navUrl(points) {
   const nav = state.settings.nav;
   const first = points[0];
-  if (nav === 'apple') return `https://maps.apple.com/?daddr=${first.lat},${first.lon}&dirflg=d`;
-  if (nav === 'waze') return `https://waze.com/ul?ll=${first.lat},${first.lon}&navigate=yes`;
+  if (nav === 'apple') {
+    const p = new URLSearchParams({ daddr: navDest(first), dirflg: 'd' });
+    if (!useCoords(first)) p.set('sll', `${first.lat},${first.lon}`); // Suchhinweis: in dieser Gegend
+    return 'https://maps.apple.com/?' + p;
+  }
+  if (nav === 'waze') {
+    return useCoords(first)
+      ? `https://waze.com/ul?ll=${first.lat},${first.lon}&navigate=yes`
+      : `https://waze.com/ul?q=${encodeURIComponent(navAddress(first))}&navigate=yes`;
+  }
   const last = points[points.length - 1];
-  const p = new URLSearchParams({ api: '1', destination: `${last.lat},${last.lon}`, travelmode: 'driving' });
+  const p = new URLSearchParams({ api: '1', destination: navDest(last), travelmode: 'driving' });
   const way = points.slice(0, -1).slice(0, 9);
-  if (way.length) p.set('waypoints', way.map((s) => `${s.lat},${s.lon}`).join('|'));
+  if (way.length) p.set('waypoints', way.map(navDest).join('|'));
   return 'https://www.google.com/maps/dir/?' + p;
 }
 
