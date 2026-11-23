@@ -3,6 +3,7 @@ import { geocode, reverse } from './geocode.js';
 import { suggest } from './autocomplete.js';
 import { normKey, remember, updatePosition, lookup, searchBook, frequent, pruneBook, autosaveTour, saveNamedTour, restoreStops, today } from './memory.js';
 import { buildRoute, haversine } from './route.js';
+import { DwellTracker, pruneVisits, visitsCsv } from './visits.js';
 import { NAV_APPS, navLink, appsFor, platformOf, defaultApp, isAppScheme } from './navigate.js';
 import { recognize, warmUp } from './ocr.js';
 import { t, setLang, getLang, applyI18n, fmtDist, fmtTime } from './i18n.js';
@@ -28,6 +29,7 @@ const defaults = {
   hideInstallHint: false,
   book: {}, // Adressbuch: häufige Adressen
   tours: [], // gespeicherte Touren
+  visits: [], // Aufenthalte an Adressen + Zustell-Ereignisse
   settings: {
     lang: 'de',
     ocr: 'deu+eng',
@@ -39,6 +41,8 @@ const defaults = {
     autoAdd: false,
     saverFirst: true,
     radius: 50,
+    trackVisits: true,
+    dwellSec: 30,
   },
 };
 
@@ -52,6 +56,7 @@ function load() {
   if (!['de', 'ru'].includes(s.settings.lang)) s.settings.lang = 'de';
   for (const st of s.stops) if (st.express && !st.service) st.service = 'express';
   // Adressen aus älteren Versionen ins Adressbuch übernehmen
+  s.visits = pruneVisits(s.visits || []);
   s.book = s.book || {};
   if (!Object.keys(s.book).length) for (const st of s.stops) remember(s.book, st);
   return s;
@@ -158,6 +163,8 @@ function render() {
 function chipsHtml(s) {
   const leg = state.route?.legsById?.[s.id];
   const chips = [];
+  const here = tracker?.presentAt();
+  if (here && here.stopId === s.id) chips.push(`<span class="chip here">📍 ${esc(t('here_since', { t: fmtClock(here.since) }))}</span>`);
   if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
   else if (s.precision === 'street') chips.push(`<span class="chip warn">⚠ ${esc(t('street_only'))}</span>`);
   if (leg) chips.push(`<span class="chip">${fmtDist(leg.distance)} · ${fmtTime(leg.duration)}</span>`);
@@ -204,7 +211,7 @@ function nextCardHtml(s) {
 function rowHtml(s, num, { first = false, last = false } = {}) {
   const { street, city } = splitAddr(s.address);
   const leg = state.route?.legsById?.[s.id];
-  const sub = [s.name, city].filter(Boolean).map(esc).join(' · ');
+  const sub = (isOpen(s) ? [s.name, city] : [doneInfo(s), s.name]).filter(Boolean).map(esc).join(' · ');
   const cls = ['row', s.status, hasPos(s) ? '' : 'nocoords', isExpress(s) && isOpen(s) ? 'svc-' + s.service : '', openId === s.id ? 'open' : ''].join(' ');
   const badge = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : num;
   const actions = isOpen(s)
@@ -253,6 +260,7 @@ function placeStop(s) {
 function setStatus(s, status) {
   s.status = status;
   s.doneAt = status === 'pending' ? null : Date.now();
+  if (status !== 'pending') logStatusEvent(s, status);
   placeStop(s);
   if (state.route?.legsById) delete state.route.legsById[s.id];
   openId = null;
@@ -846,6 +854,98 @@ function updateRouteInfo() {
     + (r.source === 'local' ? `<span class="warn">${esc(t('route_approx'))}</span>` : '');
 }
 
+/* ---------------- Aufenthalte (solange die App offen ist) ---------------- */
+
+let tracker = null;
+let watchId = null;
+let lastFix = null; // { lat, lon, acc, time }
+let lastVisitSave = 0;
+const fmtClock = (ms) => new Date(ms).toLocaleTimeString(getLang(), { hour: '2-digit', minute: '2-digit' });
+const fmtDur = (ms) => (ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} ${t('sec')}` : `${Math.round(ms / 60000)} ${t('min')}`);
+
+function updateMe() {
+  if (!map || !myPos) return;
+  if (!meMarker) {
+    meMarker = L.marker([myPos.lat, myPos.lon], {
+      icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18] }),
+      interactive: false,
+      zIndexOffset: -100,
+    }).addTo(map);
+  } else meMarker.setLatLng([myPos.lat, myPos.lon]);
+}
+
+function startTracking() {
+  stopTracking();
+  if (!state.settings.trackVisits || !navigator.geolocation) return;
+  tracker = new DwellTracker({ minMs: (+state.settings.dwellSec || 30) * 1000 });
+  watchId = navigator.geolocation.watchPosition(onFix, () => {}, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+}
+function stopTracking() {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+  tracker = null;
+}
+
+function onFix(p) {
+  const fix = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, time: Date.now() };
+  lastFix = fix;
+  myPos = { lat: fix.lat, lon: fix.lon };
+  state.lastPos = myPos;
+  updateMe();
+  handleFix(fix);
+}
+
+// Im Stand liefert das Handy kaum neue Positionen → alle 5 s die letzte (frische) Position weiterzählen
+setInterval(() => {
+  if (tracker && lastFix && document.visibilityState === 'visible' && Date.now() - lastFix.time < 600000) {
+    handleFix({ ...lastFix, time: Date.now() });
+  }
+}, 5000);
+
+function handleFix(fix) {
+  if (!tracker) return;
+  const ev = tracker.update(fix, state.stops);
+  if (ev.ended) saveVisit(ev.ended);
+  if (ev.started) {
+    state.visits.push(ev.started);
+    saveVisit(ev.started);
+    toast('📍 ' + t('visit_started', { a: splitAddr(ev.started.address).street }));
+  } else if (ev.updated && Date.now() - lastVisitSave > 15000) {
+    saveVisit(ev.updated);
+  }
+  if (ev.started || ev.ended) render();
+}
+function saveVisit() {
+  lastVisitSave = Date.now();
+  state.visits = pruneVisits(state.visits);
+  save();
+}
+
+/** Zustellung / nicht angetroffen mit Zeit und Position festhalten */
+function logStatusEvent(s, status) {
+  const fresh = lastFix && Date.now() - lastFix.time < 600000 ? lastFix : null;
+  const dist = fresh && hasPos(s) ? Math.round(haversine(fresh, s)) : null;
+  s.donePos = fresh ? { lat: fresh.lat, lon: fresh.lon, acc: Math.round(fresh.acc || 0) } : null;
+  state.visits.push({
+    id: uid(), type: status === 'delivered' ? 'zugestellt' : 'nicht angetroffen', stopId: s.id,
+    address: s.address, name: s.name || '', from: Date.now(), to: Date.now(),
+    lat: fresh?.lat ?? null, lon: fresh?.lon ?? null, dist,
+  });
+}
+
+/** "✓ 10:44 · vor Ort 2 Min." für erledigte Stopps */
+function doneInfo(s) {
+  if (!s.doneAt) return '';
+  const v = [...state.visits].reverse().find((x) => x.stopId === s.id && !x.type);
+  return `${s.status === 'delivered' ? '✓' : '!'} ${fmtClock(s.doneAt)}${v ? ' · ' + t('on_site', { d: fmtDur(v.to - v.from) }) : ''}`;
+}
+
+document.addEventListener('visibilitychange', () => {
+  // im Hintergrund weiß die App nicht, wo man ist → erst nach neuer echter Position weiterzählen
+  if (document.visibilityState === 'hidden') lastFix = null;
+  else if (state.settings.trackVisits && watchId == null) startTracking();
+});
+
 function locate(center = false) {
   return new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null);
@@ -1024,7 +1124,31 @@ function tourTitle(tr) {
   return d.toLocaleDateString(getLang(), { weekday: 'long', day: '2-digit', month: '2-digit' });
 }
 
+function dayKey(ms) {
+  return today(new Date(ms));
+}
+function renderHistory() {
+  const sel = $('#histDay');
+  const days = [...new Set(state.visits.map((v) => dayKey(v.from)))].sort().reverse();
+  if (!days.includes(today())) days.unshift(today());
+  const cur = days.includes(sel.value) ? sel.value : days[0];
+  sel.innerHTML = days.map((d) => `<option value="${d}">${esc(d === today() ? t('today') : new Date(d + 'T12:00:00').toLocaleDateString(getLang(), { weekday: 'short', day: '2-digit', month: '2-digit' }))}</option>`).join('');
+  sel.value = cur;
+  const list = state.visits.filter((v) => dayKey(v.from) === cur).sort((a, b) => b.from - a.from);
+  $('#histList').innerHTML = list.length
+    ? list.map((v) => {
+      const { street } = splitAddr(v.address);
+      const what = v.type === 'zugestellt' ? `<span class="h-ok">✓ ${t('delivered')}</span>`
+        : v.type ? `<span class="h-fail">! ${t('not_home')}</span>`
+        : `📍 ${t('on_site', { d: fmtDur(v.to - v.from) })}`;
+      return `<li class="hist"><span class="h-time">${fmtClock(v.from)}${!v.type ? '–' + fmtClock(v.to) : ''}</span>
+        <span class="h-text"><b>${esc(street)}</b><small>${what}${v.dist != null ? ` · ${v.dist} m` : ''}</small></span></li>`;
+    }).join('')
+    : `<li class="sug-empty">${esc(state.settings.trackVisits ? t('hist_empty') : t('hist_off'))}</li>`;
+}
+
 function renderTours() {
+  renderHistory();
   const list = [...(state.tours || [])].sort((a, b) => b.date.localeCompare(a.date) || (b.savedAt || 0) - (a.savedAt || 0));
   $('#tourList').innerHTML = list.length
     ? list.map((tr) => {
@@ -1094,6 +1218,24 @@ $('#tourList').addEventListener('click', (e) => {
   toast(t('tour_loaded', { n: restored.length }));
 });
 
+$('#histDay').addEventListener('change', renderHistory);
+$('#btnHistCsv').addEventListener('click', async () => {
+  const day = $('#histDay').value;
+  const list = state.visits.filter((v) => dayKey(v.from) === day);
+  if (!list.length) return toast(t('hist_empty'));
+  const name = `delivery-verlauf-${day}.csv`;
+  const file = new File([visitsCsv(list, { locale: getLang() === 'ru' ? 'ru-RU' : 'de-DE' })], name, { type: 'text/csv' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+  } catch (err) { if (err.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+});
+
 $('#btnClearBook').addEventListener('click', () => {
   if (!confirm(t('book_confirm_clear'))) return;
   state.book = {};
@@ -1103,7 +1245,7 @@ $('#btnClearBook').addEventListener('click', () => {
 
 // Sicherung als Datei (Adressbuch, Touren, Einstellungen, aktuelle Tour)
 $('#btnExport').addEventListener('click', async () => {
-  const data = JSON.stringify({ app: 'delivery', version: 1, exportedAt: new Date().toISOString(), book: state.book, tours: state.tours, settings: state.settings, stops: state.stops });
+  const data = JSON.stringify({ app: 'delivery', version: 1, exportedAt: new Date().toISOString(), book: state.book, tours: state.tours, settings: state.settings, stops: state.stops, visits: state.visits });
   const name = `delivery-sicherung-${today()}.json`;
   const file = new File([data], name, { type: 'application/json' });
   try {
@@ -1128,6 +1270,8 @@ $('#importFile').addEventListener('change', async (e) => {
     for (const [k, v] of Object.entries(d.book || {})) if (!state.book[k] || state.book[k].count < v.count) state.book[k] = v;
     const ids = new Set(state.tours.map((x) => x.id));
     state.tours = [...state.tours, ...(d.tours || []).filter((x) => !ids.has(x.id))];
+    const vids = new Set(state.visits.map((x) => x.id));
+    state.visits = pruneVisits([...state.visits, ...(d.visits || []).filter((x) => !vids.has(x.id))]);
     save();
     renderTours();
     toast(t('backup_loaded', { n: Object.keys(d.book || {}).length, t: (d.tours || []).length }));
@@ -1152,6 +1296,8 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setAutoAdd').checked = s.autoAdd;
   $('#setSaverFirst').checked = s.saverFirst;
   $('#setRadius').value = String(s.radius || 50);
+  $('#setTrack').checked = !!s.trackVisits;
+  $('#setDwell').value = String(s.dwellSec || 30);
   dlgS.showModal();
 });
 $('#btnSaveSettings').addEventListener('click', () => {
@@ -1166,8 +1312,11 @@ $('#btnSaveSettings').addEventListener('click', () => {
     autoAdd: $('#setAutoAdd').checked,
     saverFirst: $('#setSaverFirst').checked,
     radius: +$('#setRadius').value || 50,
+    trackVisits: $('#setTrack').checked,
+    dwellSec: +$('#setDwell').value || 30,
   });
   save();
+  startTracking();
   setLang(state.settings.lang);
   showView(currentView);
   render();
@@ -1190,6 +1339,7 @@ if (NativeScanner) {
 }
 setLang(state.settings.lang);
 render();
+startTracking();
 if (!IS_NATIVE && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

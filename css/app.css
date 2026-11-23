@@ -549,3 +549,17 @@ body { background: var(--bg); }
 .nav-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .nav-app { min-height: 56px; font-size: 16px; }
 #setNav + .hint { margin-top: 4px; }
+
+/* ---------- Aufenthalte / Verlauf ---------- */
+.chip.here { background: var(--green); color: #fff; font-weight: 700; }
+.hist-head { justify-content: space-between; }
+.hist-head select { font: inherit; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--text); background: var(--surface); border: .5px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+.hist { display: flex; gap: 12px; align-items: center; padding: 10px 14px; }
+.hist + .hist { border-top: .5px solid var(--line); }
+.h-time { font: 600 14px/1.2 ui-monospace, Menlo, monospace; color: var(--muted); min-width: 92px; }
+.h-text { display: grid; min-width: 0; }
+.h-text b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h-text small { font-size: 13px; color: var(--muted); }
+.h-ok { color: var(--green-text); font-weight: 600; }
+.h-fail { color: var(--orange-text); font-weight: 600; }
+#btnHistCsv { width: 100%; }
