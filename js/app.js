@@ -30,6 +30,7 @@ const defaults = {
     roundtrip: false,
     nav: IS_IOS ? 'apple' : 'google',
     autoAdd: false,
+    saverFirst: true,
   },
 };
 
@@ -41,6 +42,7 @@ function load() {
   s = { ...defaults, ...s, settings: { ...defaults.settings, ...s.settings } };
   if (!['apple', 'google', 'waze'].includes(s.settings.nav)) s.settings.nav = defaults.settings.nav;
   if (!['de', 'ru'].includes(s.settings.lang)) s.settings.lang = 'de';
+  for (const st of s.stops) if (st.express && !st.service) st.service = 'express';
   return s;
 }
 function save() {
@@ -49,6 +51,10 @@ function save() {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isOpen = (s) => s.status === 'pending';
+// Service-Stufen (UPS): kleiner = früher anfahren
+const SERVICES = ['plus', 'express', 'saver'];
+const prioOf = (s) => ({ plus: 1, express: 2, saver: state.settings.saverFirst ? 3 : 9 }[s.service] || 9);
+const isExpress = (s) => SERVICES.includes(s.service);
 const hasPos = (s) => s.lat != null;
 
 function toast(msg, ms = 2600) {
@@ -137,7 +143,8 @@ function render() {
 function chipsHtml(s) {
   const leg = state.route?.legsById?.[s.id];
   const chips = [];
-  if (s.express) chips.push(`<span class="chip express">⚡ Express</span>`);
+  if (isExpress(s)) chips.push(`<span class="chip svc-${s.service}">${esc(t('svc_chip_' + s.service))}</span>`);
+  if (s.tracking) chips.push(`<span class="chip mono">${esc(s.tracking.slice(0, 2))}…<b>${esc(s.tracking.slice(-4))}</b></span>`);
   if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
   if (leg) chips.push(`<span class="chip">${fmtDist(leg.distance)} · ${fmtTime(leg.duration)}</span>`);
   if (s.note) chips.push(`<span class="chip">${esc(s.note)}</span>`);
@@ -148,7 +155,7 @@ function nextCardHtml(s) {
   const { street, city } = splitAddr(s.address);
   return `
     <div class="next-head" data-id="${s.id}">
-      <div class="badge ${s.express ? 'express' : ''}">1</div>
+      <div class="badge ${isExpress(s) ? 'svc-' + s.service : ''}">1</div>
       <div>
         <div class="street">${esc(street)}</div>
         ${city ? `<div class="city">${esc(city)}</div>` : ''}
@@ -166,7 +173,7 @@ function nextCardHtml(s) {
     <div class="next-more" data-id="${s.id}">
       ${s.phone ? `<a class="btn plain" href="tel:${esc(s.phone)}">${ICON.phone}<span>${t('call')}</span></a>` : ''}
       <button class="btn plain" data-act="show" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}<span>${t('show_on_map')}</span></button>
-      <button class="btn plain ${s.express ? 'on' : ''}" data-act="express">${ICON.bolt}<span>Express</span></button>
+      <button class="btn plain ${isExpress(s) ? 'on' : ''}" data-act="express">${ICON.bolt}<span>Express</span></button>
       <button class="btn plain" data-act="edit">${ICON.edit}<span>${t('edit')}</span></button>
     </div>`;
 }
@@ -175,7 +182,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
   const { street, city } = splitAddr(s.address);
   const leg = state.route?.legsById?.[s.id];
   const sub = [s.name, city].filter(Boolean).map(esc).join(' · ');
-  const cls = ['row', s.status, hasPos(s) ? '' : 'nocoords', s.express && isOpen(s) ? 'express' : '', openId === s.id ? 'open' : ''].join(' ');
+  const cls = ['row', s.status, hasPos(s) ? '' : 'nocoords', isExpress(s) && isOpen(s) ? 'svc-' + s.service : '', openId === s.id ? 'open' : ''].join(' ');
   const badge = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : num;
   const actions = isOpen(s)
     ? `<div class="ra-main">
@@ -188,7 +195,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
          <button class="btn icon-only" data-act="show" aria-label="${t('show_on_map')}" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}</button>
          <button class="btn icon-only" data-act="up" aria-label="${t('up')}" ${first ? 'disabled' : ''}>${ICON.up}</button>
          <button class="btn icon-only" data-act="down" aria-label="${t('down')}" ${last ? 'disabled' : ''}>${ICON.down}</button>
-         <button class="btn icon-only ${s.express ? 'xp-on' : ''}" data-act="express" aria-label="Express">${ICON.bolt}</button>
+         <button class="btn icon-only ${isExpress(s) ? 'xp-on' : ''}" data-act="express" aria-label="Express">${ICON.bolt}</button>
          <button class="btn icon-only" data-act="edit" aria-label="${t('edit')}">${ICON.edit}</button>
          <button class="btn icon-only danger" data-act="del" aria-label="${t('delete')}">${ICON.del}</button>
        </div>`
@@ -201,7 +208,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
       <button class="row-main" data-act="toggle">
         <span class="badge">${badge}</span>
         <span class="row-text">
-          <span class="row-street" style="display:block">${s.express && isOpen(s) ? '<span class="xp">⚡</span>' : ''}${esc(street)}</span>
+          <span class="row-street" style="display:block">${isExpress(s) && isOpen(s) ? `<span class="xp svc-${s.service}">${s.service === 'plus' ? '⚡9' : s.service === 'saver' ? '⏱' : '⚡'}</span>` : ''}${esc(street)}</span>
           <span class="row-sub" style="display:block">${hasPos(s) ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}</span>
         </span>
         ${leg && isOpen(s) ? `<span class="row-eta">${fmtDist(leg.distance)}<br>${fmtTime(leg.duration)}</span>` : ''}
@@ -211,14 +218,12 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
     </li>`;
 }
 
-/** Stopp an die passende Stelle einreihen: Express hinter die letzten Express-Stopps, sonst vor die erledigten. */
+/** Stopp nach Service-Stufe einreihen (Express Plus → Express → Saver → Standard), Erledigte ans Ende. */
 function placeStop(s) {
   const i = state.stops.indexOf(s);
   if (i >= 0) state.stops.splice(i, 1);
   if (!isOpen(s)) { state.stops.push(s); return; }
-  const pos = s.express
-    ? state.stops.findIndex((x) => !isOpen(x) || !x.express)
-    : state.stops.findIndex((x) => !isOpen(x));
+  const pos = state.stops.findIndex((x) => !isOpen(x) || prioOf(x) > prioOf(s));
   state.stops.splice(pos < 0 ? state.stops.length : pos, 0, s);
 }
 
@@ -240,10 +245,11 @@ function handleAction(act, id) {
     case 'done': setStatus(s, 'delivered'); break;
     case 'fail': setStatus(s, 'failed'); break;
     case 'express':
-      s.express = !s.express;
+      s.service = isExpress(s) ? '' : 'express';
+      s.express = isExpress(s);
       placeStop(s);
       invalidateRoute();
-      toast(s.express ? t('express_on') : t('express_off'));
+      toast(isExpress(s) ? t('express_on') : t('express_off'));
       break;
     case 'restore': setStatus(s, 'pending'); invalidateRoute(); break;
     case 'nav': openNav([s]); return;
@@ -295,6 +301,18 @@ $('#btnHideHint').addEventListener('click', () => { state.hideInstallHint = true
 
 const dlg = $('#dlgAdd');
 let editing = null;
+let scanTracking = '';
+
+function getService() {
+  return $('#serviceSeg .active')?.dataset.v || '';
+}
+function setService(v) {
+  document.querySelectorAll('#serviceSeg button').forEach((b) => b.classList.toggle('active', b.dataset.v === v));
+}
+$('#serviceSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b) setService(b.dataset.v);
+});
 let candidates = [];
 
 function resetForm() {
@@ -303,7 +321,8 @@ function resetForm() {
   $('#nameInput').value = editing?.name || '';
   $('#phoneInput').value = editing?.phone || '';
   $('#noteInput').value = editing?.note || '';
-  $('#expressInput').checked = !!editing?.express;
+  setService(editing?.service || '');
+  scanTracking = editing?.tracking || '';
   $('#rawBox').hidden = true;
   $('#rawBox').open = false;
   $('#rawText').textContent = '';
@@ -420,7 +439,8 @@ async function processText(text) {
   if (r.name) $('#nameInput').value = r.name;
   if (r.phone) $('#phoneInput').value = r.phone;
   if (r.note) $('#noteInput').value = r.note;
-  if (r.express) $('#expressInput').checked = true;
+  setService(r.service || '');
+  scanTracking = r.tracking || '';
   if (r.confidence === 'low') $('#rawBox').open = true;
   await findCandidates({ auto: state.settings.autoAdd && r.confidence !== 'low' });
 }
@@ -478,15 +498,17 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
     name: $('#nameInput').value.trim(),
     phone: $('#phoneInput').value.trim(),
     note: $('#noteInput').value.trim(),
-    express: $('#expressInput').checked,
+    service: getService(),
+    express: getService() !== '',
+    tracking: scanTracking,
   };
   let stop;
   const wasEdit = !!editing;
   if (editing) {
-    const wasExpress = !!editing.express;
+    const oldPrio = prioOf(editing);
     stop = Object.assign(editing, data);
     if (c) { stop.lat = c.lat; stop.lon = c.lon; stop.geoLabel = c.label; }
-    if (wasExpress !== stop.express) placeStop(stop);
+    if (oldPrio !== prioOf(stop)) placeStop(stop);
   } else {
     if (state.stops.some((s) => s.address.toLowerCase() === address.toLowerCase()) && !confirm(t('duplicate'))) return;
     stop = { id: uid(), ...data, lat: c?.lat ?? null, lon: c?.lon ?? null, geoLabel: c?.label || '', status: 'pending', createdAt: Date.now() };
@@ -495,7 +517,7 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
   invalidateRoute();
   save();
   render();
-  if (!wasEdit) toast((stop.express ? '⚡ ' : '') + t('added', { a: splitAddr(address).street }));
+  if (!wasEdit) toast((isExpress(stop) ? t('svc_chip_' + stop.service) + ' · ' : '') + t('added', { a: splitAddr(address).street }));
 
   if (next || stayOpen) {
     editing = null;
@@ -556,12 +578,12 @@ function renderMap() {
   state.stops.forEach((s) => {
     if (!hasPos(s)) return;
     const n = pending.indexOf(s) + 1;
-    const cls = s.status === 'pending' ? [n === 1 ? 'next' : '', s.express ? 'express' : ''].join(' ').trim() : s.status;
+    const cls = s.status === 'pending' ? [n === 1 ? 'next' : '', isExpress(s) ? 'svc-' + s.service : ''].join(' ').trim() : s.status;
     const label = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : n;
     const m = L.marker([s.lat, s.lon], {
       icon: pinIcon(label, cls),
       draggable: true,
-      zIndexOffset: cls.includes('next') ? 1000 : s.express && isOpen(s) ? 800 : isOpen(s) ? 500 : 0,
+      zIndexOffset: cls.includes('next') ? 1000 : isExpress(s) && isOpen(s) ? 900 - prioOf(s) * 10 : isOpen(s) ? 500 : 0,
     }).addTo(map);
     const { street, city } = splitAddr(s.address);
     m.bindPopup(`
@@ -677,7 +699,7 @@ async function onMapClick(e) {
 
 async function optimize() {
   // Express zuerst (wichtig, falls ohne GPS beim ersten Stopp gestartet wird)
-  const pending = state.stops.filter((s) => isOpen(s) && hasPos(s)).sort((a, b) => (b.express ? 1 : 0) - (a.express ? 1 : 0));
+  const pending = state.stops.filter((s) => isOpen(s) && hasPos(s)).sort((a, b) => prioOf(a) - prioOf(b));
   if (!pending.length) return toast(t('route_nopoints'));
   const btns = [$('#btnRoute'), $('#btnOptimizeTop')];
   btns.forEach((b) => { b.disabled = true; });
@@ -691,7 +713,8 @@ async function optimize() {
       if (!start) toast(t('gps_unavailable'));
     }
     const points = start ? [{ ...start, id: '__start' }, ...pending] : pending;
-    const r = await buildRoute(points, { roundtrip: state.settings.roundtrip });
+    const priority = points.map((p) => (p.id === '__start' ? 0 : prioOf(p)));
+    const r = await buildRoute(points, { roundtrip: state.settings.roundtrip, priority });
     const ordered = r.order.map((i) => points[i]).filter((p) => p.id !== '__start');
     const legsById = {};
     r.order.forEach((pi, k) => {
@@ -764,6 +787,7 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setRoundtrip').checked = s.roundtrip;
   $('#setNav').value = s.nav;
   $('#setAutoAdd').checked = s.autoAdd;
+  $('#setSaverFirst').checked = s.saverFirst;
   dlgS.showModal();
 });
 $('#btnSaveSettings').addEventListener('click', () => {
@@ -776,6 +800,7 @@ $('#btnSaveSettings').addEventListener('click', () => {
     roundtrip: $('#setRoundtrip').checked,
     nav: $('#setNav').value,
     autoAdd: $('#setAutoAdd').checked,
+    saverFirst: $('#setSaverFirst').checked,
   });
   save();
   setLang(state.settings.lang);

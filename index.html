@@ -168,10 +168,16 @@
             <input id="noteInput" type="text" data-i18n-ph="f_note_ph">
           </label>
         </div>
-        <label class="switch express-switch">
-          <span><b>⚡ <span data-i18n="express_label">Express-Paket</span></b><small data-i18n="express_hint"></small></span>
-          <input type="checkbox" id="expressInput"><i></i>
-        </label>
+        <div class="field service-field">
+          <span data-i18n="f_service">Service</span>
+          <div class="seg" id="serviceSeg">
+            <button type="button" data-v="" class="active">Standard</button>
+            <button type="button" data-v="saver">Saver</button>
+            <button type="button" data-v="express">Express</button>
+            <button type="button" data-v="plus">Plus 9:00</button>
+          </div>
+          <small class="hint" data-i18n="express_hint"></small>
+        </div>
       </div>
 
       <details class="raw" id="rawBox" hidden>
@@ -239,6 +245,7 @@
         </label>
         <label class="switch"><span data-i18n="s_round"></span><input type="checkbox" id="setRoundtrip"><i></i></label>
         <label class="switch"><span data-i18n="s_auto"></span><input type="checkbox" id="setAutoAdd"><i></i></label>
+        <label class="switch"><span data-i18n="s_saver"></span><input type="checkbox" id="setSaverFirst"><i></i></label>
       </div>
       <div class="sheet-foot">
         <button type="button" class="btn plain danger" id="btnClearAll" data-i18n="clear_all"></button>

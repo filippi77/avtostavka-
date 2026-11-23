@@ -104,3 +104,51 @@ test('Express-Erkennung', async () => {
   assert.equal(r.address, 'Hauptstraße 12a, 10115 Berlin');
   assert.equal(extractAddress('Anna Schmidt\nHauptstraße 12a\n10115 Berlin').express, false);
 });
+
+test('UPS-Etikett (Großbuchstaben, SHIP/TO, Absender ohne Label)', async () => {
+  const { extractTracking } = await import('../js/address.js');
+  const label = `MUSTER VERSAND GMBH
++49 30 9876543
+INDUSTRIESTR. 7
+33602 BIELEFELD
+GERMANY
+1 KG
+1 OF 1
+SHIP
+TO: ANNA SCHMIDT
+ACME GMBH
++49 151 23456789
+HAUPTSTRASSE 12A
+10115 BERLIN
+GERMANY
+DEU 101 2-01
+UPS EXPRESS SAVER
+TRACKING #: 1Z 999 AA1 01 2345 6784
+BILLING: P/P`;
+  const r = extractAddress(label);
+  assert.equal(r.address, 'Hauptstrasse 12a, 10115 Berlin');
+  assert.equal(r.name, 'Anna Schmidt · Acme GmbH');
+  assert.equal(r.phone, '+4915123456789');
+  assert.equal(r.service, 'saver');
+  assert.equal(r.tracking, '1Z999AA10123456784');
+  assert.equal(extractTracking('kein code'), '');
+});
+
+test('UPS-Servicestufen', async () => {
+  const { detectService } = await import('../js/address.js');
+  assert.equal(detectService('UPS EXPRESS PLUS'), 'plus');
+  assert.equal(detectService('UPS EXPRESS 12:00'), 'express');
+  assert.equal(detectService('UPS WORLDWIDE EXPRESS'), 'express');
+  assert.equal(detectService('UPS EXPRESS SAVER'), 'saver');
+  assert.equal(detectService('UPS SAVER'), 'saver');
+  assert.equal(detectService('UPS STANDARD'), '');
+  assert.equal(detectService('UPS EXPEDITED'), '');
+  assert.equal(detectService('Zustellung bis 9:00 Uhr'), 'plus');
+});
+
+test('SHIP TO in einer Zeile, Absender oben', () => {
+  const r = extractAddress(`SHIPPER INC\nWERKSTRASSE 1\n70173 STUTTGART\nSHIP TO: MAX MÜLLER-LÜDENSCHEID\nAM MARKT 3\n80331 MÜNCHEN\nUPS STANDARD`);
+  assert.equal(r.address, 'Am Markt 3, 80331 München');
+  assert.equal(r.name, 'Max Müller-Lüdenscheid');
+  assert.equal(r.service, '');
+});

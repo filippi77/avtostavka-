@@ -63,7 +63,7 @@ public class ScannerActivity extends AppCompatActivity {
     // Hausnummer am Zeilenende: "Hauptstraße 12a", "Weg 3-5"
     private static final Pattern STREET_LINE = Pattern.compile(".*\\p{L}{2,}.*\\s\\d{1,4}\\s?[a-zA-Z]?(\\s?[-/]\\s?\\d{1,4}[a-zA-Z]?)?$");
     private static final Pattern SENDER = Pattern.compile("(?i)^\\s*(absender|abs\\.|von\\s*:|from\\s*:|versender|return|rücksende|отправитель).*");
-    private static final Pattern RECIPIENT = Pattern.compile("(?i)^\\s*(empfänger|an\\s*:|lieferadresse|lieferanschrift|ship\\s*to|deliver\\s*to|куда|получатель).*");
+    private static final Pattern RECIPIENT = Pattern.compile("(?i)^\\s*(ship\\s*$|ship\\s*to|empfänger|an\\s*:|lieferadresse|lieferanschrift|ship\\s*to|deliver\\s*to|куда|получатель).*");
 
     private PreviewView previewView;
     private View frame;

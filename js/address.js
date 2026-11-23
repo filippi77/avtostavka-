@@ -46,9 +46,9 @@ function fixOcr(line) {
 
 /* ===================== Deutsch ===================== */
 
-const DE_RECIPIENT = /^\s*(?:(?:empfänger(?:in)?|lieferadresse|lieferanschrift|zustelladresse|versandadresse|ship\s*to|deliver\s*to|recipient|куда|кому|получатель|адрес\s+(?:получателя|доставки))(?:\s*[:.\-]\s*|\s+|$)|(?:an|to)\s*:\s*)/iu;
+const DE_RECIPIENT = /^\s*(?:(?:empfänger(?:in)?|lieferadresse|lieferanschrift|zustelladresse|versandadresse|ship\s*to|deliver\s*to|recipient|куда|кому|получатель|адрес\s+(?:получателя|доставки))(?:\s*[:.\-]\s*|\s+|$)|(?:an|to)\s*:\s*|ship\s*$)/iu;
 const DE_SENDER = /^\s*(?:(?:absender(?:in)?|abs\.|abs|sender|versender|return(?:\s+address)?|rücksende(?:adresse|anschrift)?|retour(?:e|enadresse)?|отправитель|от\s+кого|откуда)(?:\s*[:.\-]\s*|\s+|$)|(?:von|from|versand)\s*:\s*)/iu;
-const DE_STOP = /^\s*(tel|telefon|phone|mobil|handy|e-?mail|gewicht|weight|sendungs?(nummer|-?nr)|paket-?nr|tracking|referenz|ref\.|bestell|auftrag|kunden-?nr|datum|date|inhalt|warenwert|hinweis|zustellhinweis|lieferhinweis|nachnahme|vers(and)?art|service|produkt|тел|вес|заказ|трек)/iu;
+const DE_STOP = /^\s*(tel|telefon|phone|mobil|handy|e-?mail|gewicht|weight|sendungs?(nummer|-?nr)|paket-?nr|tracking|referenz|ref\.|bestell|auftrag|kunden-?nr|datum|date|inhalt|warenwert|hinweis|zustellhinweis|lieferhinweis|nachnahme|vers(and)?art|service|produkt|shp|dwt|billing|ups\s|1z\s?[0-9a-z]{3}|\d+\s*(?:kg|lbs?)\b|\d+\s+of\s+\d+|тел|вес|заказ|трек)/iu;
 
 const DE_SUFFIX = '(?:straße|strasse|str\\.|str|weg|allee|platz|pl\\.|gasse|ring|damm|ufer|chaussee|steig|stieg|pfad|markt|graben|wall|kamp|promenade|zeile|hof|berg|feld|garten|winkel|brücke|tor|park|siedlung|anger|aue|bogen|grund|höhe|kai|stadt|heide)';
 const DE_PREFIX = '(?:am|an\\s+der|an\\s+den|an\\s+dem|auf\\s+der|auf\\s+dem|auf\\s+den|im|in\\s+der|in\\s+den|unter\\s+den|zum|zur|hinter\\s+der|hinter\\s+dem|vor\\s+dem|vor\\s+der|alte[rs]?|neue[rs]?|großer?|kleiner?|obere[rs]?|untere[rs]?|hohe[rs]?|lange[rs]?|platz\\s+der|straße\\s+de[rs])';
@@ -135,7 +135,7 @@ function extractGerman(rawLines) {
       if (s > 0) { si = j; sScore = s; break; }
     }
     let score = sScore + (plz.five ? 2 : 1);
-    for (let j = i; j >= Math.max(0, i - 5); j--) {
+    for (let j = i; j >= Math.max(0, i - 7); j--) {
       if (DE_RECIPIENT.test(lines[j])) { score += 3; break; }
     }
     cands.push({ i, si, sScore, plz, score });
@@ -152,16 +152,40 @@ function extractGerman(rawLines) {
   let name = '';
   let note = '';
   const top = c.si >= 0 ? c.si : c.i;
-  for (let j = top - 1; j >= Math.max(0, top - 3); j--) {
+  const names = [];
+  for (let j = top - 1; j >= Math.max(0, top - 4) && names.length < 2; j--) {
     if (ex.has(j)) break;
     const l = lines[j].replace(DE_RECIPIENT, '').trim();
-    if (/^(c\/o|z\.\s?hd)/i.test(l)) { note = l; continue; }
+    if (!l) continue;
+    if (/^(c\/o|z\.\s?hd|attn|att\.|z\.hd)/i.test(l)) { note = note || l; continue; }
     if (DE_POSTNUMMER.test(l)) { note = l; continue; }
-    if (isNameLine(lines[j])) { name = l; }
+    if (/^(tel|telefon|phone|mobil)/i.test(l) || /^[+\d][\d\s/()-]{6,}$/.test(l)) continue;
+    if (/^(herrn?|frau|firma|mr\.?|mrs\.?|ms\.?)$/i.test(l)) continue;
+    if (isNameLine(lines[j])) { names.unshift(l); continue; }
     break;
   }
+  name = names.map(smartCase).join(' · ');
   const confidence = c.sScore >= 4 && c.plz.five ? 'high' : c.sScore > 0 ? 'medium' : 'low';
-  return { address, name, note, confidence };
+  // Empfänger-Block (für die Telefonnummer): ab Label/Name bis kurz nach PLZ, ohne Absender
+  let from = Math.max(0, top - 5);
+  while (from < top && ex.has(from)) from++;
+  for (let j = from; j < top; j++) if (!ex.has(j) && DE_RECIPIENT.test(lines[j])) { from = j; break; }
+  const block = lines.slice(from, c.i + 4).filter((_, k) => !ex.has(from + k));
+  // Zeilen eines anderen (Absender-)Blocks vor dem Empfänger abschneiden: alles bis zur letzten PLZ-Zeile davor
+  let cut = 0;
+  block.forEach((l, k) => { if (from + k < c.i && matchPlz(l)) cut = k + 1; });
+  return { address: smartCase(address), name, note, confidence, blockText: block.slice(cut).join('\n') };
+}
+
+const KEEP_CASE = { GMBH: 'GmbH', AG: 'AG', KG: 'KG', UG: 'UG', OHG: 'OHG', GBR: 'GbR', 'E.K.': 'e.K.', 'E.V.': 'e.V.', 'CO.': 'Co.', UPS: 'UPS', DHL: 'DHL', II: 'II', III: 'III' };
+/** "HAUPTSTRASSE 12A, 10115 BERLIN" → "Hauptstrasse 12a, 10115 Berlin" (nur bei reiner Großschreibung, z. B. UPS). */
+export function smartCase(s) {
+  if (!s || /\p{Ll}/u.test(s) || !/\p{Lu}{2}/u.test(s)) return s;
+  return s.replace(/[\p{L}.]+/gu, (w) => {
+    if (KEEP_CASE[w]) return KEEP_CASE[w];
+    if (/^\d/.test(w)) return w;
+    return w.charAt(0) + w.slice(1).toLowerCase();
+  }).replace(/(\d)([A-Z])\b/g, (_, d, l) => d + l.toLowerCase());
 }
 
 function normalizeStreet(s) {
@@ -253,24 +277,55 @@ function extractRussian(lines) {
 // Express-/Prioritätssendungen (DHL Express, GLS Express, DPD Express 10:00/12:00, UPS Express Saver …)
 const EXPRESS_RE = /(^|[^\p{L}])(express|expr\.|expresszustellung|priority|priorit[äa]t|prio|same[\s-]?day|sameday|overnight|next[\s-]?flight|time\s?definite|vor\s*(?:8|9|10|11|12)(?::00)?\s*uhr|bis\s*(?:8|9|10|11|12)(?::00)?\s*uhr|(?:8|9|10|12):00\s*(?:uhr|express)|экспресс|срочн)(?![\p{L}])/iu;
 
-/** true, wenn das Etikett eine Express-/Prioritätssendung kennzeichnet. */
-export function detectExpress(text) {
-  return EXPRESS_RE.test(String(text || ''));
+const PLUS_RE = /(^|[^\p{L}])(express\s*plus|exp\.?\s*plus|(?:vor|bis)\s*(?:8|9)(?:[:.]\d\d)?\s*uhr|(?:8|9)[:.](?:00|30)\s*(?:uhr|express|am)?(?![\d]))/iu;
+const SAVER_RE = /(^|[^\p{L}])(express\s*saver|ups\s*saver|saver)(?![\p{L}])/iu;
+const TRACKING_RE = /(?:^|[^0-9A-Z])(1Z\s?(?:[0-9A-Z]\s?){16})(?![0-9A-Z])/i;
+
+/**
+ * Service-Stufe der Sendung (UPS & andere):
+ * 'plus' = Express Plus / vor 9 Uhr, 'express' = Express / vor 10:30–12 Uhr,
+ * 'saver' = Express Saver (bis Tagesende), '' = Standard.
+ */
+export function detectService(text) {
+  const t = String(text || '');
+  if (PLUS_RE.test(t)) return 'plus';
+  if (SAVER_RE.test(t)) return 'saver';
+  if (EXPRESS_RE.test(t)) return 'express';
+  return '';
 }
 
-/** Liefert { address, name, phone, note, confidence, express } aus dem OCR-Text. */
+/** true, wenn das Etikett eine Express-/Prioritätssendung kennzeichnet. */
+export function detectExpress(text) {
+  return detectService(text) !== '';
+}
+
+/** UPS-Sendungsnummer (1Z…), ohne Leerzeichen. */
+export function extractTracking(text) {
+  const m = String(text || '').match(TRACKING_RE);
+  return m ? m[1].replace(/\s/g, '').toUpperCase() : '';
+}
+
+/** Liefert { address, name, phone, note, confidence, service, express, tracking } aus dem OCR-Text. */
 export function extractAddress(text) {
-  return { ...extractAddressInner(text), express: detectExpress(text) };
+  const service = detectService(text);
+  return { ...extractAddressInner(text), service, express: service !== '', tracking: extractTracking(text) };
 }
 
 function extractAddressInner(text) {
   const lines = String(text || '').split(/\r?\n/).map(fixOcr).filter(Boolean);
   const phone = extractPhone(lines.join('\n'));
   const de = extractGerman(lines);
-  if (de && (de.confidence !== 'low' || !RU_HINT.test(text))) return { ...de, phone };
+  if (de) {
+    // Telefon bevorzugt aus dem Empfängerblock (bei UPS steht oben die Nummer des Absenders)
+    const p = extractPhone(de.blockText);
+    if (p || !/\d{5}\s+\p{Lu}[\s\S]*\d{5}\s+\p{Lu}/u.test(text)) de.phone = p || phone;
+    else de.phone = '';
+    delete de.blockText;
+  }
+  if (de && (de.confidence !== 'low' || !RU_HINT.test(text))) return { ...de, phone: de.phone };
   const ru = extractRussian(lines);
   if (ru.address) return { name: '', note: '', ...ru, phone };
-  if (de) return { ...de, phone };
+  if (de) return { ...de, phone: de.phone };
   return { address: '', name: '', note: '', phone, confidence: 'none' };
 }
 

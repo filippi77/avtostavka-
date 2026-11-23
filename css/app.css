@@ -371,3 +371,25 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .4); }
 .express-switch input:checked + i { background: var(--express); }
 .next-more .btn { flex-direction: column; gap: 3px; min-height: 54px; font-size: 12px; font-weight: 600; padding: 4px 2px; }
 .next-more svg { width: 22px; height: 22px; }
+
+/* ---------- UPS-Servicestufen ---------- */
+:root { --saver: #af52de; --saver-soft: rgba(175, 82, 222, .12); }
+@media (prefers-color-scheme: dark) { :root { --saver: #bf5af2; --saver-soft: rgba(191, 90, 242, .2); } }
+.chip.svc-plus, .chip.svc-express { background: var(--express); color: #fff; font-weight: 700; }
+.chip.svc-saver { background: var(--saver); color: #fff; font-weight: 700; }
+.chip.mono { font-family: ui-monospace, Menlo, monospace; letter-spacing: .02em; }
+.next-card .badge.svc-plus, .next-card .badge.svc-express, .row.svc-plus .badge, .row.svc-express .badge { background: var(--express); }
+.next-card .badge.svc-saver, .row.svc-saver .badge { background: var(--saver); }
+.row.svc-plus, .row.svc-express { background: var(--express-soft); }
+.row.svc-saver { background: var(--saver-soft); }
+.xp.svc-saver { color: var(--saver); }
+.xp.svc-plus, .xp.svc-express { color: var(--express); }
+.pin.svc-plus, .pin.svc-express { background: var(--express); }
+.pin.svc-saver { background: var(--saver); }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px; margin-top: 6px; border-radius: 10px; background: var(--surface-2); }
+@media (prefers-color-scheme: light) { .seg { background: #eeeef0; } }
+.seg button { border: 0; background: transparent; border-radius: 8px; padding: 8px 2px; font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+.seg button.active { background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.seg button.active[data-v="plus"], .seg button.active[data-v="express"] { background: var(--express); color: #fff; }
+.seg button.active[data-v="saver"] { background: var(--saver); color: #fff; }
+.service-field .hint { margin-top: 6px; }

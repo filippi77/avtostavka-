@@ -21,8 +21,9 @@ function pathCost(order, D, roundtrip) {
 /**
  * Reihenfolge der Stopps. Index 0 = Start (fest).
  * D — Kostenmatrix (darf asymmetrisch sein).
- * priority[i] — Priorität (0 = Express zuerst, 1 = normal). Alle Stopps mit
- * Priorität 0 werden vor allen mit Priorität 1 angefahren.
+ * priority[i] — Priorität (kleiner = früher, z. B. 1 = Express Plus, 2 = Express,
+ * 3 = Saver, 9 = Standard). Stopps mit kleinerer Zahl werden immer vor Stopps
+ * mit größerer Zahl angefahren, innerhalb einer Stufe in der schnellsten Reihenfolge.
  * Liefert Indizes, beginnend mit 0.
  */
 export function optimizeOrder(D, roundtrip = false, priority = null) {
@@ -102,9 +103,7 @@ async function fetchJson(url, timeoutMs = 15000) {
  * Строит маршрут: points[0] — старт.
  * Возвращает { order, geometry: [[lat,lon],...], distance, duration, source }.
  */
-export async function buildRoute(points, { roundtrip = false } = {}) {
-  // points[i].express === true → Express-Stopp, wird zuerst angefahren
-  const priority = points.map((p, i) => (i > 0 && !p.express ? 1 : 0));
+export async function buildRoute(points, { roundtrip = false, priority = null } = {}) {
   let D = null;
   let source = 'osrm';
   try {
