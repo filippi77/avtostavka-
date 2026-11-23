@@ -1,8 +1,8 @@
-// Кэширование оболочки приложения для работы при слабом интернете.
-const VERSION = 'v1';
+// App-Shell-Cache für schwaches Netz unterwegs.
+const VERSION = 'v2';
 const SHELL = [
-  './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
-  'js/app.js', 'js/address.js', 'js/geocode.js', 'js/route.js', 'js/ocr.js',
+  './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png',
+  'js/app.js', 'js/i18n.js', 'js/address.js', 'js/geocode.js', 'js/route.js', 'js/ocr.js',
 ];
 const CDN = 'https://cdn.jsdelivr.net/';
 
@@ -19,7 +19,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = e.request.url;
   if (e.request.method !== 'GET') return;
-  // Библиотеки и модели OCR с CDN: сначала кэш (версии зафиксированы)
+  // Bibliotheken und OCR-Modelle vom CDN: Cache zuerst (Versionen sind fixiert)
   if (url.startsWith(CDN)) {
     e.respondWith(
       caches.open('cdn').then(async (c) => {
@@ -32,7 +32,7 @@ self.addEventListener('fetch', (e) => {
     );
     return;
   }
-  // Файлы приложения: сначала сеть, при отсутствии — кэш
+  // App-Dateien: Netz zuerst, sonst Cache
   if (new URL(url).origin === location.origin) {
     e.respondWith(
       fetch(e.request)

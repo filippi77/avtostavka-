@@ -1,177 +1,244 @@
 <!doctype html>
-<html lang="ru">
+<html lang="de">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Автоставка</title>
-  <meta name="description" content="Сканирование адресов с этикеток посылок, карта и маршрут доставки">
-  <meta name="theme-color" content="#1f6feb">
+  <title>Avtostavka</title>
+  <meta name="description" content="Paketzustellung: Versandetiketten scannen, Adressen auf der Karte, optimale Route">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Avtostavka">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="format-detection" content="telephone=no">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
   <header class="topbar">
-    <h1>Автоставка</h1>
-    <div class="summary" id="summary"></div>
-    <button class="icon-btn" id="btnSettings" aria-label="Настройки">
-      <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5.1-1-.1-1 2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11l-.1 1 .1 1-2.1 1.6 2 3.5 2.5-1a7 7 0 0 0 1.7 1L11 21h4l.4-2.6a7 7 0 0 0 1.7-1l2.5 1 2-3.5-2.2-1.6Z"/></svg>
-    </button>
+    <div class="topbar-row">
+      <div class="titles">
+        <h1 id="title" data-i18n="tab_tour">Tour</h1>
+        <div class="sub" id="summary"></div>
+      </div>
+      <button class="round-btn" id="btnOptimizeTop" data-i18n-aria="optimize" hidden>
+        <svg viewBox="0 0 24 24"><path d="M5 19c3-6 11-2 14-14"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/></svg>
+      </button>
+      <button class="round-btn" id="btnSettings" data-i18n-aria="settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      </button>
+    </div>
+    <div class="progress-line" id="progressLine"><div id="progressFill"></div></div>
   </header>
 
   <main>
-    <!-- Список -->
+    <!-- Tour -->
     <section class="view active" id="view-list">
-      <div class="list-actions">
-        <button class="btn primary big" id="btnScan">
-          <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M7 12h10"/></svg>
-          Сканировать этикетку
-        </button>
-        <button class="btn" id="btnManual">Ввести адрес</button>
+      <div class="install-hint" id="installHint" hidden>
+        <svg viewBox="0 0 24 24"><path d="M12 15V3m0 0L8 7m4-4 4 4M6 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1"/></svg>
+        <span data-i18n-html="install_ios"></span>
+        <button class="x-btn" id="btnHideHint" data-i18n-aria="close">✕</button>
       </div>
+
       <div class="empty" id="emptyList">
-        <p><b>Список пуст.</b></p>
-        <p>Сфотографируйте этикетку посылки — приложение распознает адрес, найдёт его на карте и добавит в маршрут.</p>
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>
+        </div>
+        <h2 data-i18n="empty_title">Noch keine Pakete</h2>
+        <p data-i18n="empty_text"></p>
+        <button class="btn primary big" id="btnScanEmpty">
+          <svg viewBox="0 0 24 24"><path d="M3 9V6a3 3 0 0 1 3-3h3M15 3h3a3 3 0 0 1 3 3v3M21 15v3a3 3 0 0 1-3 3h-3M9 21H6a3 3 0 0 1-3-3v-3"/><path d="M7 12h10"/></svg>
+          <span data-i18n="scan_label">Etikett scannen</span>
+        </button>
+        <button class="btn plain" id="btnManualEmpty" data-i18n="manual">Adresse eingeben</button>
       </div>
-      <ol class="stops" id="stops"></ol>
-      <div class="list-footer" id="listFooter">
-        <button class="btn" id="btnOptimize">Построить оптимальный маршрут</button>
-        <button class="btn ghost danger" id="btnClearDelivered">Убрать доставленные</button>
+
+      <div id="nextWrap" hidden>
+        <div class="section-label" data-i18n="next_stop">Nächster Stopp</div>
+        <article class="next-card" id="nextCard"></article>
       </div>
+
+      <div id="restWrap" hidden>
+        <div class="section-label"><span data-i18n="more_stops">Weitere Stopps</span> <span class="count" id="restCount"></span></div>
+        <ol class="group" id="stops"></ol>
+      </div>
+
+      <button class="btn plain wide" id="btnManual" hidden data-i18n="manual_add">+ Adresse manuell eingeben</button>
+
+      <details class="done-wrap" id="doneWrap" hidden>
+        <summary class="section-label"><span data-i18n="done_section">Erledigt</span> <span class="count" id="doneCount"></span></summary>
+        <ol class="group" id="doneList"></ol>
+        <button class="btn plain wide danger" id="btnClearDone" data-i18n="clear_done">Erledigte entfernen</button>
+      </details>
     </section>
 
-    <!-- Карта -->
+    <!-- Karte -->
     <section class="view" id="view-map">
       <div id="map"></div>
+      <button class="round-btn map-fab" id="btnLocate" aria-label="GPS">
+        <svg viewBox="0 0 24 24"><path d="m3 11 19-9-9 19-2-8-8-2Z"/></svg>
+      </button>
       <div class="map-panel">
-        <div class="route-info" id="routeInfo">Маршрут не построен</div>
+        <div class="route-info" id="routeInfo"></div>
         <div class="map-buttons">
-          <button class="btn primary" id="btnRoute">Маршрут</button>
-          <button class="btn" id="btnOpenNav">Навигатор</button>
-          <button class="icon-btn" id="btnLocate" aria-label="Моё местоположение">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5" fill="none"/></svg>
+          <button class="btn" id="btnRoute">
+            <svg viewBox="0 0 24 24"><path d="M5 19c3-6 11-2 14-14"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/></svg>
+            <span data-i18n="optimize_short">Optimieren</span>
+          </button>
+          <button class="btn primary" id="btnOpenNav">
+            <svg viewBox="0 0 24 24"><path d="m3 11 19-9-9 19-2-8-8-2Z"/></svg>
+            <span data-i18n="start_nav">Losfahren</span>
           </button>
         </div>
       </div>
       <div class="place-hint" id="placeHint" hidden>
-        Коснитесь карты, чтобы указать точку для: <b id="placeHintAddr"></b>
-        <button class="btn small" id="btnPlaceCancel">Отмена</button>
+        <div><span data-i18n="place_hint"></span><br><b id="placeHintAddr"></b></div>
+        <button class="btn small" id="btnPlaceCancel" data-i18n="cancel">Abbrechen</button>
       </div>
     </section>
   </main>
 
   <nav class="tabbar">
     <button class="tab active" data-view="list">
-      <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>
-      Список
+      <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/></svg>
+      <span data-i18n="tab_tour">Tour</span>
     </button>
-    <button class="tab scan" id="tabScan" aria-label="Сканировать">
-      <svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>
+    <button class="tab scan" id="tabScan" data-i18n-aria="scan">
+      <span class="scan-bubble">
+        <svg viewBox="0 0 24 24"><path d="M3 9V6a3 3 0 0 1 3-3h3M15 3h3a3 3 0 0 1 3 3v3M21 15v3a3 3 0 0 1-3 3h-3M9 21H6a3 3 0 0 1-3-3v-3"/><path d="M7 12h10"/></svg>
+      </span>
+      <span data-i18n="scan">Scannen</span>
     </button>
     <button class="tab" data-view="map">
       <svg viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Zm0 0v14m6-12v14"/></svg>
-      Карта
+      <span data-i18n="tab_map">Karte</span>
     </button>
   </nav>
 
   <input type="file" accept="image/*" capture="environment" id="fileCamera" hidden>
   <input type="file" accept="image/*" id="fileGallery" hidden>
 
-  <!-- Окно сканирования / добавления -->
+  <!-- Paket hinzufügen / scannen -->
   <dialog id="dlgAdd" class="sheet">
-    <form method="dialog" class="sheet-body" id="addForm">
+    <div class="grabber"></div>
+    <form method="dialog" class="sheet-body" id="addForm" autocomplete="off">
       <div class="sheet-head">
-        <h2 id="addTitle">Новая посылка</h2>
-        <button class="icon-btn" value="cancel" aria-label="Закрыть">✕</button>
+        <h2 id="addTitle" data-i18n="new_parcel">Neues Paket</h2>
+        <button class="x-btn" value="cancel" data-i18n-aria="close">✕</button>
       </div>
 
-      <div class="scan-src" id="scanSrc">
-        <button type="button" class="btn primary" id="btnCamera">📷 Камера</button>
-        <button type="button" class="btn" id="btnGallery">🖼 Из галереи</button>
+      <div id="scanSrc">
+        <button type="button" class="photo-drop" id="btnCamera">
+          <img id="scanPreview" alt="" hidden>
+          <span class="photo-drop-empty" id="photoEmpty">
+            <svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13.5" r="3.5"/></svg>
+            <b data-i18n="take_photo">Etikett fotografieren</b>
+            <small data-i18n="take_photo_hint"></small>
+          </span>
+          <span class="photo-retake" id="photoRetake" hidden data-i18n="retake">Neues Foto</span>
+        </button>
+        <button type="button" class="btn plain small" id="btnGallery" data-i18n="gallery">Aus Fotos wählen</button>
       </div>
 
       <div class="progress" id="ocrProgress" hidden>
-        <div class="progress-label" id="ocrLabel">Распознавание…</div>
+        <div class="progress-label" id="ocrLabel"></div>
         <div class="progress-bar"><div id="ocrBar"></div></div>
       </div>
 
-      <img id="scanPreview" class="scan-preview" alt="" hidden>
-
-      <label class="field">
-        <span>Адрес доставки</span>
-        <textarea id="addrInput" rows="3" placeholder="г. Москва, ул. Тверская, д. 7, кв. 12"></textarea>
-      </label>
-      <div class="row2">
+      <div class="form-group">
         <label class="field">
-          <span>Телефон</span>
-          <input id="phoneInput" type="tel" placeholder="+7…">
+          <span data-i18n="f_address">Lieferadresse</span>
+          <textarea id="addrInput" rows="2" data-i18n-ph="f_address_ph" autocapitalize="words"></textarea>
         </label>
         <label class="field">
-          <span>Заметка</span>
-          <input id="noteInput" type="text" placeholder="подъезд, время…">
+          <span data-i18n="f_name">Empfänger</span>
+          <input id="nameInput" type="text" data-i18n-ph="f_name_ph" autocapitalize="words">
         </label>
+        <div class="row2">
+          <label class="field">
+            <span data-i18n="f_phone">Telefon</span>
+            <input id="phoneInput" type="tel" placeholder="+49 …">
+          </label>
+          <label class="field">
+            <span data-i18n="f_note">Notiz</span>
+            <input id="noteInput" type="text" data-i18n-ph="f_note_ph">
+          </label>
+        </div>
       </div>
 
       <details class="raw" id="rawBox" hidden>
-        <summary>Распознанный текст</summary>
+        <summary data-i18n="raw_text">Erkannter Text</summary>
         <pre id="rawText"></pre>
-        <p class="hint">Выделите нужную строку и скопируйте в поле адреса, если адрес найден неверно.</p>
+        <p class="hint" data-i18n="raw_hint"></p>
       </details>
 
-      <button type="button" class="btn" id="btnFind">Найти на карте</button>
+      <button type="button" class="btn" id="btnFind">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span data-i18n="find">Adresse suchen</span>
+      </button>
       <div class="status" id="geoStatus"></div>
       <ul class="candidates" id="candidates"></ul>
 
       <div class="sheet-foot">
-        <button type="button" class="btn ghost" id="btnAddNoCoords">Указать на карте вручную</button>
-        <button type="button" class="btn primary" id="btnAdd" disabled>Добавить</button>
+        <button type="button" class="btn plain" id="btnAddNoCoords" data-i18n="place_manually">Auf Karte setzen</button>
+        <button type="button" class="btn" id="btnAddNext" disabled data-i18n="add_next">Hinzufügen & nächstes</button>
+        <button type="button" class="btn primary" id="btnAdd" disabled data-i18n="add">Hinzufügen</button>
       </div>
     </form>
   </dialog>
 
-  <!-- Настройки -->
+  <!-- Einstellungen -->
   <dialog id="dlgSettings" class="sheet">
+    <div class="grabber"></div>
     <form method="dialog" class="sheet-body">
       <div class="sheet-head">
-        <h2>Настройки</h2>
-        <button class="icon-btn" value="cancel" aria-label="Закрыть">✕</button>
+        <h2 data-i18n="settings">Einstellungen</h2>
+        <button class="x-btn" value="cancel" data-i18n-aria="close">✕</button>
       </div>
-      <label class="field">
-        <span>Город по умолчанию (если на этикетке не указан)</span>
-        <input id="setCity" type="text" placeholder="например, Казань">
-      </label>
-      <label class="field">
-        <span>Страна поиска (код ISO, пусто — везде)</span>
-        <input id="setCountry" type="text" maxlength="20" placeholder="ru">
-      </label>
-      <label class="field">
-        <span>Начало маршрута</span>
-        <select id="setStart">
-          <option value="gps">Моё местоположение (GPS)</option>
-          <option value="first">Первая точка списка</option>
-        </select>
-      </label>
-      <label class="check">
-        <input type="checkbox" id="setRoundtrip"> Вернуться в точку старта
-      </label>
-      <label class="field">
-        <span>Навигатор</span>
-        <select id="setNav">
-          <option value="yandex">Яндекс Карты / Навигатор</option>
-          <option value="google">Google Maps</option>
-          <option value="2gis">2ГИС</option>
-        </select>
-      </label>
-      <label class="check">
-        <input type="checkbox" id="setAutoAdd"> Добавлять сразу, если адрес найден однозначно
-      </label>
+      <div class="form-group">
+        <label class="field"><span data-i18n="s_lang"></span>
+          <select id="setLang"><option value="de">Deutsch</option><option value="ru">Русский</option></select>
+        </label>
+        <label class="field"><span data-i18n="s_ocr"></span>
+          <select id="setOcr">
+            <option value="deu+eng" data-i18n="s_ocr_deu"></option>
+            <option value="deu+rus+eng" data-i18n="s_ocr_deu_rus"></option>
+            <option value="rus+eng" data-i18n="s_ocr_rus"></option>
+          </select>
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="field"><span data-i18n="s_city"></span>
+          <input id="setCity" type="text" data-i18n-ph="s_city_ph" autocapitalize="words">
+        </label>
+        <label class="field"><span data-i18n="s_country"></span>
+          <input id="setCountry" type="text" maxlength="20" placeholder="de">
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="field"><span data-i18n="s_start"></span>
+          <select id="setStart">
+            <option value="gps" data-i18n="s_start_gps"></option>
+            <option value="first" data-i18n="s_start_first"></option>
+          </select>
+        </label>
+        <label class="field"><span data-i18n="s_nav"></span>
+          <select id="setNav">
+            <option value="apple">Apple Karten</option>
+            <option value="google">Google Maps</option>
+            <option value="waze">Waze</option>
+          </select>
+        </label>
+        <label class="switch"><span data-i18n="s_round"></span><input type="checkbox" id="setRoundtrip"><i></i></label>
+        <label class="switch"><span data-i18n="s_auto"></span><input type="checkbox" id="setAutoAdd"><i></i></label>
+      </div>
       <div class="sheet-foot">
-        <button type="button" class="btn ghost danger" id="btnClearAll">Очистить весь список</button>
-        <button class="btn primary" value="save" id="btnSaveSettings">Сохранить</button>
+        <button type="button" class="btn plain danger" id="btnClearAll" data-i18n="clear_all"></button>
+        <button class="btn primary" value="save" id="btnSaveSettings" data-i18n="save">Speichern</button>
       </div>
     </form>
   </dialog>

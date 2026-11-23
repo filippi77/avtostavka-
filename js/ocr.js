@@ -1,14 +1,20 @@
-// Распознавание текста на фото этикетки (Tesseract.js, работает прямо в браузере).
+// Texterkennung auf dem Foto des Etiketts (Tesseract.js, läuft direkt auf dem Gerät).
 
 let workerPromise = null;
+let workerLangs = '';
 let progressCb = () => {};
 
-function getWorker() {
+function getWorker(langs) {
+  if (workerPromise && workerLangs !== langs) {
+    workerPromise.then((w) => w.terminate()).catch(() => {});
+    workerPromise = null;
+  }
   if (!workerPromise) {
-    workerPromise = window.Tesseract.createWorker('rus+eng', 1, {
+    workerLangs = langs;
+    workerPromise = window.Tesseract.createWorker(langs, 1, {
       logger: (m) => {
-        if (m.status === 'recognizing text') progressCb('Распознавание…', m.progress);
-        else if (/loading|initializ/.test(m.status)) progressCb('Загрузка модели распознавания…', m.progress);
+        if (m.status === 'recognizing text') progressCb('run', m.progress);
+        else if (/loading|initializ/.test(m.status)) progressCb('load', m.progress);
       },
     }).catch((e) => {
       workerPromise = null;
@@ -18,7 +24,7 @@ function getWorker() {
   return workerPromise;
 }
 
-/** Уменьшает фото, переводит в оттенки серого и усиливает контраст. */
+/** Verkleinert das Foto, wandelt in Graustufen um und erhöht den Kontrast. */
 export async function preprocess(file, maxSide = 2000) {
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => loadViaImg(file));
   const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
@@ -31,7 +37,7 @@ export async function preprocess(file, maxSide = 2000) {
   ctx.drawImage(bmp, 0, 0, w, h);
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
-  // гистограмма яркости для автоконтраста
+  // Helligkeitshistogramm für Auto-Kontrast
   const hist = new Uint32Array(256);
   for (let i = 0; i < d.length; i += 4) {
     const y = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
@@ -61,11 +67,16 @@ function loadViaImg(file) {
   });
 }
 
-export async function recognize(file, onProgress = () => {}) {
+/** Vorab laden, damit der erste Scan schneller ist. */
+export function warmUp(langs = 'deu+eng') {
+  if (window.Tesseract) getWorker(langs).catch(() => {});
+}
+
+export async function recognize(file, onProgress = () => {}, langs = 'deu+eng') {
   progressCb = onProgress;
-  onProgress('Подготовка изображения…', 0);
+  onProgress('prep', 0);
   const canvas = await preprocess(file);
-  const worker = await getWorker();
+  const worker = await getWorker(langs);
   const { data } = await worker.recognize(canvas);
   return { text: data.text || '', canvas };
 }

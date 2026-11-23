@@ -1,4 +1,4 @@
-// Оптимизация порядка объезда и построение маршрута (OSRM с локальным запасным вариантом).
+// Optimierung der Reihenfolge und Routenberechnung (OSRM mit lokalem Fallback).
 
 const OSRM = 'https://router.project-osrm.org';
 

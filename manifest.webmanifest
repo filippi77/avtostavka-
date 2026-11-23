@@ -1,18 +1,17 @@
 {
-  "name": "Автоставка — маршруты доставки",
-  "short_name": "Автоставка",
-  "description": "Сканирование адресов с этикеток посылок, карта и оптимальный маршрут",
-  "lang": "ru",
+  "name": "Avtostavka – Paketzustellung",
+  "short_name": "Avtostavka",
+  "description": "Versandetiketten scannen, Adressen auf der Karte, optimale Route",
+  "lang": "de",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f4f6f9",
-  "theme_color": "#1f6feb",
+  "background_color": "#f2f2f7",
+  "theme_color": "#f2f2f7",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

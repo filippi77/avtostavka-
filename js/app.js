@@ -1,261 +1,417 @@
 import { extractAddress } from './address.js';
 import { geocode, reverse } from './geocode.js';
 import { buildRoute } from './route.js';
-import { recognize } from './ocr.js';
+import { recognize, warmUp } from './ocr.js';
+import { t, setLang, getLang, applyI18n, fmtDist, fmtTime } from './i18n.js';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'avtostavka.v1';
 
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_STANDALONE = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+
 const defaults = {
   stops: [],
   route: null,
-  settings: { city: '', country: 'ru', start: 'gps', roundtrip: false, nav: 'yandex', autoAdd: false },
+  hideInstallHint: false,
+  settings: {
+    lang: 'de',
+    ocr: 'deu+eng',
+    city: '',
+    country: 'de',
+    start: 'gps',
+    roundtrip: false,
+    nav: IS_IOS ? 'apple' : 'google',
+    autoAdd: false,
+  },
 };
 
 let state = load();
 function load() {
-  try {
-    const s = JSON.parse(localStorage.getItem(KEY));
-    if (s && Array.isArray(s.stops)) return { ...defaults, ...s, settings: { ...defaults.settings, ...s.settings } };
-  } catch {}
-  return structuredClone(defaults);
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(KEY)); } catch {}
+  if (!s || !Array.isArray(s.stops)) return structuredClone(defaults);
+  s = { ...defaults, ...s, settings: { ...defaults.settings, ...s.settings } };
+  if (!['apple', 'google', 'waze'].includes(s.settings.nav)) s.settings.nav = defaults.settings.nav;
+  if (!['de', 'ru'].includes(s.settings.lang)) s.settings.lang = 'de';
+  return s;
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const isOpen = (s) => s.status === 'pending';
+const hasPos = (s) => s.lat != null;
 
-function toast(msg, ms = 2500) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.classList.add('show');
+function toast(msg, ms = 2600) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => t.classList.remove('show'), ms);
+  toast.t = setTimeout(() => el.classList.remove('show'), ms);
 }
 
-const fmtKm = (m) => (m >= 1000 ? (m / 1000).toFixed(1).replace('.', ',') + ' км' : Math.round(m) + ' м');
-const fmtTime = (s) => {
-  const m = Math.round(s / 60);
-  return m >= 60 ? `${Math.floor(m / 60)} ч ${m % 60} мин` : `${m} мин`;
+/** "Hauptstraße 12, 10115 Berlin" → { street, city } */
+function splitAddr(a) {
+  const parts = String(a).split(/\s*,\s*/);
+  const i = parts.findIndex((p, k) => k > 0 && /^\d{4,5}\s/.test(p));
+  if (i > 0) return { street: parts.slice(0, i).join(', '), city: parts.slice(i).join(', ') };
+  return { street: a, city: '' };
+}
+
+const ICON = {
+  nav: '<svg viewBox="0 0 24 24"><path d="m3 11 19-9-9 19-2-8-8-2Z"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+  phone: '<svg viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg>',
+  pin: '<svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+  edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/></svg>',
+  up: '<svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  del: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  undo: '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
+  chev: '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
 };
 
-/* ---------------- Вкладки ---------------- */
+/* ---------------- Ansichten ---------------- */
 
 let currentView = 'list';
 function showView(v) {
   currentView = v;
   document.querySelectorAll('.view').forEach((el) => el.classList.toggle('active', el.id === 'view-' + v));
   document.querySelectorAll('.tab[data-view]').forEach((el) => el.classList.toggle('active', el.dataset.view === v));
+  $('#title').dataset.i18n = v === 'map' ? 'tab_map' : 'tab_tour';
+  $('#title').textContent = t($('#title').dataset.i18n);
   if (v === 'map') {
     initMap();
-    setTimeout(() => { map.invalidateSize(); renderMap(); }, 0);
+    if (map) setTimeout(() => { map.invalidateSize(); renderMap(); }, 0);
   }
 }
 document.querySelectorAll('.tab[data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
 
-/* ---------------- Список ---------------- */
-
-function invalidateRoute() {
-  state.route = null;
-}
+/* ---------------- Tour-Liste ---------------- */
 
 let openId = null;
-function render() {
-  const list = $('#stops');
-  const pending = state.stops.filter((s) => s.status !== 'delivered');
-  const done = state.stops.length - pending.length;
-  $('#summary').textContent = state.stops.length ? `${pending.length} осталось · ${done} доставлено` : '';
-  $('#emptyList').hidden = state.stops.length > 0;
-  $('#listFooter').hidden = state.stops.length === 0;
 
-  const legs = state.route?.legsById || {};
-  let n = 0;
-  list.innerHTML = state.stops
-    .map((s, i) => {
-      const delivered = s.status === 'delivered';
-      if (!delivered) n++;
-      const leg = legs[s.id];
-      return `
-      <li class="stop ${openId === s.id ? 'open' : ''} ${delivered ? 'delivered' : ''} ${s.lat == null ? 'nocoords' : ''}" data-id="${s.id}">
-        <div class="num">${delivered ? '✓' : n}</div>
-        <div class="stop-main" data-act="toggle">
-          <div class="addr">${esc(s.address)}</div>
-          <div class="meta">
-            ${s.lat == null ? '<span class="warn">нет координат — укажите на карте</span>' : ''}
-            ${s.phone ? `<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ''}
-            ${s.note ? `<span>${esc(s.note)}</span>` : ''}
-            ${leg && !delivered ? `<span>${fmtKm(leg.distance)} · ${fmtTime(leg.duration)}</span>` : ''}
-          </div>
-        </div>
-        <div class="stop-actions">
-          <button class="btn done" data-act="done">${delivered ? 'Вернуть' : '✓ Доставлено'}</button>
-          ${s.lat != null ? '<button class="btn" data-act="nav">Навигатор</button>' : '<button class="btn" data-act="place">На карте</button>'}
-          <button class="icon-btn" data-act="toggle" aria-label="Ещё"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
-        </div>
-        <div class="stop-extra">
-          <button class="icon-btn" data-act="up" aria-label="Выше" ${i === 0 ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg></button>
-          <button class="icon-btn" data-act="down" aria-label="Ниже" ${i === state.stops.length - 1 ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-          <button class="icon-btn" data-act="show" aria-label="Показать на карте" ${s.lat == null ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg></button>
-          <button class="icon-btn" data-act="edit" aria-label="Изменить"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/></svg></button>
-          <button class="icon-btn" data-act="del" aria-label="Удалить"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
-        </div>
-      </li>`;
-    })
-    .join('');
+function invalidateRoute() { state.route = null; }
+
+function render() {
+  const pending = state.stops.filter(isOpen);
+  const done = state.stops.filter((s) => !isOpen(s));
+  const total = state.stops.length;
+
+  $('#summary').textContent = total ? t('summary', { left: pending.length, done: done.length }) : t('summary_empty');
+  $('#progressFill').style.width = total ? (done.length / total) * 100 + '%' : '0';
+  $('#btnOptimizeTop').hidden = pending.filter(hasPos).length < 2;
+  $('#emptyList').hidden = total > 0;
+  $('#btnManual').hidden = total === 0;
+  $('#installHint').hidden = !(IS_IOS && !IS_STANDALONE && !state.hideInstallHint);
+
+  // Nächster Stopp
+  const next = pending[0];
+  $('#nextWrap').hidden = !next;
+  if (next) $('#nextCard').innerHTML = nextCardHtml(next);
+
+  // Weitere Stopps
+  const rest = pending.slice(1);
+  $('#restWrap').hidden = rest.length === 0;
+  $('#restCount').textContent = rest.length;
+  $('#stops').innerHTML = rest.map((s, k) => rowHtml(s, k + 2, { first: k === 0, last: k === rest.length - 1 })).join('');
+
+  // Erledigt
+  $('#doneWrap').hidden = done.length === 0;
+  $('#doneCount').textContent = done.length;
+  $('#doneList').innerHTML = done.map((s) => rowHtml(s, null)).join('');
+
   if (map) renderMap();
 }
 
-$('#stops').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-act]');
-  if (!btn) return;
-  const id = btn.closest('.stop').dataset.id;
-  const i = state.stops.findIndex((s) => s.id === id);
-  const s = state.stops[i];
-  switch (btn.dataset.act) {
-    case 'toggle': openId = openId === id ? null : id; render(); return;
-    case 'done':
-      s.status = s.status === 'delivered' ? 'pending' : 'delivered';
-      s.deliveredAt = s.status === 'delivered' ? Date.now() : null;
-      // доставленные — в конец списка
-      if (s.status === 'delivered') { state.stops.splice(i, 1); state.stops.push(s); }
-      break;
+function chipsHtml(s) {
+  const leg = state.route?.legsById?.[s.id];
+  const chips = [];
+  if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
+  if (leg) chips.push(`<span class="chip">${fmtDist(leg.distance)} · ${fmtTime(leg.duration)}</span>`);
+  if (s.note) chips.push(`<span class="chip">${esc(s.note)}</span>`);
+  return chips.length ? `<div class="chips">${chips.join('')}</div>` : '';
+}
+
+function nextCardHtml(s) {
+  const { street, city } = splitAddr(s.address);
+  return `
+    <div class="next-head" data-id="${s.id}">
+      <div class="badge">1</div>
+      <div>
+        <div class="street">${esc(street)}</div>
+        ${city ? `<div class="city">${esc(city)}</div>` : ''}
+        ${s.name ? `<div class="who">${esc(s.name)}</div>` : ''}
+        ${chipsHtml(s)}
+      </div>
+    </div>
+    <div class="next-actions" data-id="${s.id}">
+      ${hasPos(s)
+        ? `<button class="btn primary" data-act="nav">${ICON.nav}<span>${t('navigate')}</span></button>`
+        : `<button class="btn primary" data-act="place">${ICON.pin}<span>${t('set_on_map')}</span></button>`}
+      <button class="btn success" data-act="done">${ICON.check}<span>${t('delivered')}</span></button>
+      <button class="btn warn" data-act="fail">${t('not_home')}</button>
+    </div>
+    <div class="next-more" data-id="${s.id}">
+      ${s.phone ? `<a class="btn plain" href="tel:${esc(s.phone)}">${ICON.phone}<span>${t('call')}</span></a>` : ''}
+      <button class="btn plain" data-act="show" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}<span>${t('show_on_map')}</span></button>
+      <button class="btn plain" data-act="edit">${ICON.edit}<span>${t('edit')}</span></button>
+    </div>`;
+}
+
+function rowHtml(s, num, { first = false, last = false } = {}) {
+  const { street, city } = splitAddr(s.address);
+  const leg = state.route?.legsById?.[s.id];
+  const sub = [s.name, city].filter(Boolean).map(esc).join(' · ');
+  const cls = ['row', s.status, hasPos(s) ? '' : 'nocoords', openId === s.id ? 'open' : ''].join(' ');
+  const badge = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : num;
+  const actions = isOpen(s)
+    ? `<div class="ra-main">
+         ${hasPos(s) ? `<button class="btn primary" data-act="nav">${ICON.nav}<span>${t('nav_short')}</span></button>` : `<button class="btn primary" data-act="place">${ICON.pin}<span>${t('nav_short')}</span></button>`}
+         <button class="btn success" data-act="done">${ICON.check}<span>${t('delivered')}</span></button>
+         <button class="btn warn" data-act="fail">${t('not_home_short')}</button>
+       </div>
+       <div class="ra-tools">
+         ${s.phone ? `<a class="btn icon-only" href="tel:${esc(s.phone)}" aria-label="${t('call')}">${ICON.phone}</a>` : ''}
+         <button class="btn icon-only" data-act="show" aria-label="${t('show_on_map')}" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}</button>
+         <button class="btn icon-only" data-act="up" aria-label="${t('up')}" ${first ? 'disabled' : ''}>${ICON.up}</button>
+         <button class="btn icon-only" data-act="down" aria-label="${t('down')}" ${last ? 'disabled' : ''}>${ICON.down}</button>
+         <button class="btn icon-only" data-act="edit" aria-label="${t('edit')}">${ICON.edit}</button>
+         <button class="btn icon-only danger" data-act="del" aria-label="${t('delete')}">${ICON.del}</button>
+       </div>`
+    : `<div class="ra-tools">
+         <button class="btn" data-act="restore" style="flex:4">${ICON.undo}<span>${t('restore')}</span></button>
+         <button class="btn icon-only danger" data-act="del" aria-label="${t('delete')}">${ICON.del}</button>
+       </div>`;
+  return `
+    <li class="${cls}" data-id="${s.id}">
+      <button class="row-main" data-act="toggle">
+        <span class="badge">${badge}</span>
+        <span class="row-text">
+          <span class="row-street" style="display:block">${esc(street)}</span>
+          <span class="row-sub" style="display:block">${hasPos(s) ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}</span>
+        </span>
+        ${leg && isOpen(s) ? `<span class="row-eta">${fmtDist(leg.distance)}<br>${fmtTime(leg.duration)}</span>` : ''}
+        ${ICON.chev}
+      </button>
+      <div class="row-actions">${actions}</div>
+    </li>`;
+}
+
+function setStatus(s, status) {
+  const i = state.stops.indexOf(s);
+  s.status = status;
+  s.doneAt = status === 'pending' ? null : Date.now();
+  state.stops.splice(i, 1);
+  if (status === 'pending') {
+    // vor die erledigten einreihen
+    const firstDone = state.stops.findIndex((x) => !isOpen(x));
+    state.stops.splice(firstDone < 0 ? state.stops.length : firstDone, 0, s);
+  } else {
+    state.stops.push(s);
+  }
+  if (state.route?.legsById) delete state.route.legsById[s.id];
+  openId = null;
+}
+
+function handleAction(act, id) {
+  const s = state.stops.find((x) => x.id === id);
+  if (!s) return;
+  const pending = state.stops.filter(isOpen);
+  const pi = pending.indexOf(s);
+  switch (act) {
+    case 'toggle': openId = openId === id ? null : id; break;
+    case 'done': setStatus(s, 'delivered'); break;
+    case 'fail': setStatus(s, 'failed'); break;
+    case 'restore': setStatus(s, 'pending'); invalidateRoute(); break;
     case 'nav': openNav([s]); return;
     case 'place': startPlacing(s.id); return;
-    case 'show': showView('map'); setTimeout(() => { map.setView([s.lat, s.lon], 17); markers[s.id]?.openPopup(); }, 50); return;
-    case 'up': if (i > 0) { [state.stops[i - 1], state.stops[i]] = [state.stops[i], state.stops[i - 1]]; invalidateRoute(); } break;
-    case 'down': if (i < state.stops.length - 1) { [state.stops[i + 1], state.stops[i]] = [state.stops[i], state.stops[i + 1]]; invalidateRoute(); } break;
     case 'edit': openAdd({ edit: s }); return;
-    case 'del':
-      if (!confirm('Удалить адрес?\n' + s.address)) return;
-      state.stops.splice(i, 1);
+    case 'show':
+      showView('map');
+      setTimeout(() => { if (map) { map.setView([s.lat, s.lon], 17); markers[s.id]?.openPopup(); } }, 60);
+      return;
+    case 'up':
+    case 'down': {
+      const other = pending[act === 'up' ? pi - 1 : pi + 1];
+      if (!other) return;
+      const a = state.stops.indexOf(s);
+      const b = state.stops.indexOf(other);
+      [state.stops[a], state.stops[b]] = [state.stops[b], state.stops[a]];
       invalidateRoute();
       break;
+    }
+    case 'del':
+      if (!confirm(t('confirm_delete') + '\n' + s.address)) return;
+      state.stops.splice(state.stops.indexOf(s), 1);
+      invalidateRoute();
+      break;
+    default: return;
   }
   save();
   render();
+}
+
+$('#view-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn || btn.disabled) return;
+  const holder = btn.closest('[data-id]');
+  if (holder) handleAction(btn.dataset.act, holder.dataset.id);
 });
 
-$('#btnClearDelivered').addEventListener('click', () => {
-  const n = state.stops.filter((s) => s.status === 'delivered').length;
-  if (!n) return toast('Нет доставленных');
-  if (!confirm(`Убрать ${n} доставленных из списка?`)) return;
-  state.stops = state.stops.filter((s) => s.status !== 'delivered');
-  invalidateRoute();
+$('#btnClearDone').addEventListener('click', () => {
+  const n = state.stops.filter((s) => !isOpen(s)).length;
+  if (!n) return toast(t('nothing_done'));
+  if (!confirm(t('confirm_clear_done', { n }))) return;
+  state.stops = state.stops.filter(isOpen);
   save();
   render();
 });
+$('#btnHideHint').addEventListener('click', () => { state.hideInstallHint = true; save(); render(); });
 
-/* ---------------- Добавление / сканирование ---------------- */
+/* ---------------- Hinzufügen / Scannen ---------------- */
 
 const dlg = $('#dlgAdd');
 let editing = null;
 let candidates = [];
-let lastPhoto = null;
+
+function resetForm() {
+  candidates = [];
+  $('#addrInput').value = editing?.address || '';
+  $('#nameInput').value = editing?.name || '';
+  $('#phoneInput').value = editing?.phone || '';
+  $('#noteInput').value = editing?.note || '';
+  $('#rawBox').hidden = true;
+  $('#rawBox').open = false;
+  $('#rawText').textContent = '';
+  const prev = $('#scanPreview');
+  if (prev.src) URL.revokeObjectURL(prev.src);
+  prev.removeAttribute('src');
+  prev.hidden = true;
+  $('#photoEmpty').hidden = false;
+  $('#photoRetake').hidden = true;
+  $('#btnCamera').classList.remove('has-photo');
+  $('#ocrProgress').hidden = true;
+  $('#candidates').innerHTML = '';
+  setGeoStatus('');
+  setAddEnabled(!!editing);
+}
+
+function setAddEnabled(on) {
+  $('#btnAdd').disabled = !on;
+  $('#btnAddNext').disabled = !on;
+}
 
 function openAdd({ edit = null, scan = false } = {}) {
   editing = edit;
-  candidates = [];
-  $('#addTitle').textContent = edit ? 'Изменить адрес' : 'Новая посылка';
+  $('#addTitle').textContent = t(edit ? 'edit_stop' : 'new_parcel');
   $('#scanSrc').hidden = !!edit;
-  $('#addrInput').value = edit?.address || '';
-  $('#phoneInput').value = edit?.phone || '';
-  $('#noteInput').value = edit?.note || '';
-  $('#rawBox').hidden = true;
-  $('#rawText').textContent = '';
-  $('#scanPreview').hidden = true;
-  $('#ocrProgress').hidden = true;
-  $('#candidates').innerHTML = '';
-  $('#geoStatus').textContent = '';
-  $('#geoStatus').className = 'status';
-  $('#btnAdd').disabled = !edit;
-  $('#btnAdd').textContent = edit ? 'Сохранить' : 'Добавить';
+  $('#btnAddNext').hidden = !!edit;
+  $('#btnAdd').textContent = t(edit ? 'save' : 'add');
+  resetForm();
   if (!dlg.open) dlg.showModal();
+  if (!edit) warmUp(state.settings.ocr);
   if (scan) $('#fileCamera').click();
 }
 
-$('#btnScan').addEventListener('click', () => openAdd({ scan: true }));
 $('#tabScan').addEventListener('click', () => openAdd({ scan: true }));
+$('#btnScanEmpty').addEventListener('click', () => openAdd({ scan: true }));
+$('#btnManualEmpty').addEventListener('click', () => { openAdd(); $('#addrInput').focus(); });
 $('#btnManual').addEventListener('click', () => { openAdd(); $('#addrInput').focus(); });
 $('#btnCamera').addEventListener('click', () => $('#fileCamera').click());
 $('#btnGallery').addEventListener('click', () => $('#fileGallery').click());
 $('#fileCamera').addEventListener('change', onPhoto);
 $('#fileGallery').addEventListener('change', onPhoto);
+// Tippen auf den abgedunkelten Hintergrund schließt das Sheet
+for (const d of [dlg, $('#dlgSettings')]) {
+  d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+}
 
 async function onPhoto(e) {
   const file = e.target.files?.[0];
   e.target.value = '';
   if (!file) return;
   if (!dlg.open) openAdd();
-  lastPhoto = file;
+  if (!editing) resetForm();
   const prev = $('#scanPreview');
-  if (prev.src) URL.revokeObjectURL(prev.src);
   prev.src = URL.createObjectURL(file);
   prev.hidden = false;
+  $('#photoEmpty').hidden = true;
+  $('#photoRetake').hidden = false;
+  $('#btnCamera').classList.add('has-photo');
 
   const pr = $('#ocrProgress');
   pr.hidden = false;
   $('#btnFind').disabled = true;
+  const labels = { prep: 'ocr_prep', load: 'ocr_load', run: 'ocr_run' };
   try {
-    if (!window.Tesseract) throw new Error('Модуль распознавания не загрузился — проверьте интернет');
-    const { text } = await recognize(file, (label, p) => {
-      $('#ocrLabel').textContent = label;
+    if (!window.Tesseract) throw new Error(t('ocr_unavailable'));
+    const { text } = await recognize(file, (phase, p) => {
+      $('#ocrLabel').textContent = t(labels[phase] || 'ocr_run');
       $('#ocrBar').style.width = Math.round((p || 0) * 100) + '%';
-    });
-    $('#rawText').textContent = text.trim() || '(текст не найден)';
+    }, state.settings.ocr);
+    $('#rawText').textContent = text.trim() || t('no_text');
     $('#rawBox').hidden = false;
-    const { address, phone, confidence } = extractAddress(text);
-    if (!address) {
+    const r = extractAddress(text);
+    if (!r.address) {
       $('#rawBox').open = true;
-      setStatus('Адрес не найден на фото. Введите вручную или переснимите крупнее.', true);
+      setGeoStatus(t('ocr_none'), true);
       return;
     }
-    $('#addrInput').value = address;
-    if (phone && !$('#phoneInput').value) $('#phoneInput').value = phone;
-    if (confidence === 'low') $('#rawBox').open = true;
-    await findCandidates({ auto: state.settings.autoAdd && confidence !== 'low' });
+    $('#addrInput').value = r.address;
+    if (r.name) $('#nameInput').value = r.name;
+    if (r.phone) $('#phoneInput').value = r.phone;
+    if (r.note) $('#noteInput').value = r.note;
+    if (r.confidence === 'low') $('#rawBox').open = true;
+    pr.hidden = true;
+    await findCandidates({ auto: state.settings.autoAdd && r.confidence !== 'low' });
   } catch (err) {
     console.error(err);
-    setStatus('Ошибка распознавания: ' + (err.message || err), true);
+    setGeoStatus(t('ocr_error') + (err.message || err), true);
   } finally {
     pr.hidden = true;
     $('#btnFind').disabled = false;
   }
 }
 
-function setStatus(msg, err = false) {
+function setGeoStatus(msg, err = false) {
   const el = $('#geoStatus');
   el.textContent = msg;
   el.className = 'status' + (err ? ' err' : '');
 }
 
 function nearPoint() {
-  const pts = state.stops.filter((s) => s.lat != null);
+  const pts = state.stops.filter(hasPos);
   if (pts.length) return { lat: pts.reduce((a, s) => a + s.lat, 0) / pts.length, lon: pts.reduce((a, s) => a + s.lon, 0) / pts.length };
   return myPos;
 }
 
 async function findCandidates({ auto = false } = {}) {
   const addr = $('#addrInput').value.trim();
-  if (!addr) return setStatus('Введите адрес', true);
-  setStatus('Поиск адреса на карте…');
+  if (!addr) return setGeoStatus(t('enter_address'), true);
+  setGeoStatus(t('searching'));
   $('#candidates').innerHTML = '';
-  $('#btnAdd').disabled = !editing;
+  setAddEnabled(!!editing);
   try {
-    candidates = await geocode(addr, { country: state.settings.country.trim().toLowerCase(), city: state.settings.city, near: nearPoint() });
+    candidates = await geocode(addr, {
+      country: state.settings.country.trim().toLowerCase(),
+      city: state.settings.city,
+      near: nearPoint(),
+      lang: getLang(),
+    });
   } catch (err) {
     candidates = [];
-    return setStatus(err.message || 'Ошибка геокодера', true);
+    return setGeoStatus(t('geocoder_error') + ' (' + (err.message || err) + ')', true);
   }
-  if (!candidates.length) {
-    return setStatus('Адрес не найден. Исправьте текст (город, улица, дом) или укажите точку на карте вручную.', true);
-  }
-  setStatus(candidates.length === 1 ? 'Найдено:' : `Найдено вариантов: ${candidates.length}. Выберите нужный:`);
+  if (!candidates.length) return setGeoStatus(t('not_found'), true);
+  setGeoStatus(candidates.length === 1 ? t('found_one') : t('found_many', { n: candidates.length }));
   $('#candidates').innerHTML = candidates
     .map((c, i) => `<li><label><input type="radio" name="cand" value="${i}" ${i === 0 ? 'checked' : ''}><span>${esc(c.label)}</span></label></li>`)
     .join('');
-  $('#btnAdd').disabled = false;
-  if (auto && candidates.length === 1) commitAdd();
+  setAddEnabled(true);
+  if (auto && candidates.length === 1) commitAdd({ stayOpen: true });
 }
 
 $('#btnFind').addEventListener('click', () => findCandidates());
@@ -263,41 +419,47 @@ $('#addrInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); findCandidates(); }
 });
 
-function commitAdd({ withoutCoords = false } = {}) {
-  const address = $('#addrInput').value.trim();
-  if (!address) return setStatus('Введите адрес', true);
+function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {}) {
+  const address = $('#addrInput').value.trim().replace(/\s*\n\s*/g, ', ');
+  if (!address) return setGeoStatus(t('enter_address'), true);
   const sel = document.querySelector('input[name="cand"]:checked');
   const c = !withoutCoords && sel ? candidates[+sel.value] : null;
   const data = {
     address,
+    name: $('#nameInput').value.trim(),
     phone: $('#phoneInput').value.trim(),
     note: $('#noteInput').value.trim(),
   };
   let stop;
+  const wasEdit = !!editing;
   if (editing) {
     stop = Object.assign(editing, data);
     if (c) { stop.lat = c.lat; stop.lon = c.lon; stop.geoLabel = c.label; }
   } else {
-    if (state.stops.some((s) => s.address.toLowerCase() === address.toLowerCase()) && !confirm('Такой адрес уже есть в списке. Добавить ещё раз?')) return;
+    if (state.stops.some((s) => s.address.toLowerCase() === address.toLowerCase()) && !confirm(t('duplicate'))) return;
     stop = { id: uid(), ...data, lat: c?.lat ?? null, lon: c?.lon ?? null, geoLabel: c?.label || '', status: 'pending', createdAt: Date.now() };
-    // новые — перед доставленными
-    const firstDone = state.stops.findIndex((s) => s.status === 'delivered');
-    if (firstDone < 0) state.stops.push(stop); else state.stops.splice(firstDone, 0, stop);
+    const firstDone = state.stops.findIndex((s) => !isOpen(s));
+    state.stops.splice(firstDone < 0 ? state.stops.length : firstDone, 0, stop);
   }
   invalidateRoute();
   save();
   render();
-  const wasEdit = !!editing;
+  if (!wasEdit) toast(t('added', { a: splitAddr(address).street }));
+
+  if (next || stayOpen) {
+    editing = null;
+    resetForm();
+    if (next) $('#fileCamera').click(); // noch innerhalb der Nutzer-Geste (wichtig für iOS)
+    return;
+  }
   dlg.close();
   if (withoutCoords) startPlacing(stop.id);
-  else if (!wasEdit) {
-    toast('Добавлено: ' + address);
-  }
 }
 $('#btnAdd').addEventListener('click', () => commitAdd());
+$('#btnAddNext').addEventListener('click', () => commitAdd({ next: true }));
 $('#btnAddNoCoords').addEventListener('click', () => commitAdd({ withoutCoords: true }));
 
-/* ---------------- Карта ---------------- */
+/* ---------------- Karte ---------------- */
 
 let map = null;
 let markers = {};
@@ -305,48 +467,64 @@ let routeLine = null;
 let meMarker = null;
 let myPos = null;
 let placingId = null;
-const FIT = { paddingTopLeft: [30, 30], paddingBottomRight: [30, 150] };
+const FIT = { paddingTopLeft: [40, 40], paddingBottomRight: [40, 170] };
 
 function initMap() {
   if (map) return;
-  if (!window.L) { toast('Карта не загрузилась — проверьте интернет'); return; }
-  map = L.map('map', { zoomControl: false }).setView([55.751, 37.618], 11);
-  L.control.zoom({ position: 'topright' }).addTo(map);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap',
+  if (!window.L) { toast(t('map_failed')); return; }
+  map = L.map('map', { zoomControl: false }).setView([51.1657, 10.4515], 6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20,
+    subdomains: 'abcd',
+    attribution: '© OpenStreetMap · © CARTO',
   }).addTo(map);
   map.on('click', onMapClick);
-  let fitted = false;
-  const pts = state.stops.filter((s) => s.lat != null);
-  if (pts.length) { map.fitBounds(pts.map((s) => [s.lat, s.lon]), FIT); fitted = true; }
-  locate(!fitted);
+  const pts = state.stops.filter(hasPos);
+  if (pts.length) map.fitBounds(pts.map((s) => [s.lat, s.lon]), FIT);
+  locate(!pts.length);
 }
 
 function pinIcon(label, cls) {
-  return L.divIcon({ className: '', html: `<div class="pin ${cls}"><span>${label}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] });
+  const big = cls === 'next';
+  const small = cls === 'delivered' || cls === 'failed';
+  const size = big ? 40 : small ? 24 : 32;
+  return L.divIcon({
+    className: '',
+    html: `<div class="pin ${cls}"><span>${label}</span></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size + 2],
+    popupAnchor: [0, -size],
+  });
 }
 
 function renderMap() {
   if (!map) return;
   Object.values(markers).forEach((m) => m.remove());
   markers = {};
-  let n = 0;
-  let nextMarked = false;
-  for (const s of state.stops) {
-    const delivered = s.status === 'delivered';
-    if (!delivered) n++;
-    if (s.lat == null) continue;
-    let cls = delivered ? 'delivered' : '';
-    if (!delivered && !nextMarked) { cls = 'next'; nextMarked = true; }
-    const m = L.marker([s.lat, s.lon], { icon: pinIcon(delivered ? '✓' : n, cls), draggable: true }).addTo(map);
+  const pending = state.stops.filter(isOpen);
+  state.stops.forEach((s) => {
+    if (!hasPos(s)) return;
+    const n = pending.indexOf(s) + 1;
+    const cls = s.status === 'pending' ? (n === 1 ? 'next' : '') : s.status;
+    const label = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : n;
+    const m = L.marker([s.lat, s.lon], {
+      icon: pinIcon(label, cls),
+      draggable: true,
+      zIndexOffset: cls === 'next' ? 1000 : isOpen(s) ? 500 : 0,
+    }).addTo(map);
+    const { street, city } = splitAddr(s.address);
     m.bindPopup(`
-      <b>${delivered ? '✓' : n}. ${esc(s.address)}</b><br>
-      ${s.phone ? `<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a><br>` : ''}
-      ${s.note ? esc(s.note) + '<br>' : ''}
-      <button class="btn small primary" data-pop="nav" data-id="${s.id}">Навигатор</button>
-      <button class="btn small" data-pop="done" data-id="${s.id}">${delivered ? 'Вернуть' : '✓ Доставлено'}</button>
-      <div class="hint">Маркер можно перетащить, если точка неточная</div>`);
+      <b>${isOpen(s) ? n + '. ' : ''}${esc(street)}</b><br>
+      ${city ? esc(city) + '<br>' : ''}
+      ${s.name ? esc(s.name) + '<br>' : ''}
+      ${s.phone ? `<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ''}
+      <div class="pop-actions">
+        ${isOpen(s)
+          ? `<button class="btn primary" data-pop="nav" data-id="${s.id}">${t('navigate')}</button>
+             <button class="btn success" data-pop="done" data-id="${s.id}">✓</button>`
+          : `<button class="btn" data-pop="restore" data-id="${s.id}">${t('restore')}</button>`}
+      </div>
+      <div class="pop-hint">${t('drag_hint')}</div>`);
     m.on('dragend', () => {
       const p = m.getLatLng();
       s.lat = p.lat;
@@ -354,13 +532,13 @@ function renderMap() {
       invalidateRoute();
       save();
       render();
-      toast('Точка перемещена');
+      toast(t('point_moved'));
     });
     markers[s.id] = m;
-  }
+  });
   if (routeLine) { routeLine.remove(); routeLine = null; }
   if (state.route?.geometry?.length) {
-    routeLine = L.polyline(state.route.geometry, { color: '#1f6feb', weight: 5, opacity: 0.75 }).addTo(map);
+    routeLine = L.polyline(state.route.geometry, { color: '#007aff', weight: 6, opacity: 0.8, lineJoin: 'round' }).addTo(map);
   }
   updateRouteInfo();
 }
@@ -370,26 +548,23 @@ document.addEventListener('click', (e) => {
   if (!b) return;
   const s = state.stops.find((x) => x.id === b.dataset.id);
   if (!s) return;
-  if (b.dataset.pop === 'nav') openNav([s]);
-  if (b.dataset.pop === 'done') {
-    s.status = s.status === 'delivered' ? 'pending' : 'delivered';
-    const i = state.stops.indexOf(s);
-    if (s.status === 'delivered') { state.stops.splice(i, 1); state.stops.push(s); }
-    save();
-    map.closePopup();
-    render();
-  }
+  const act = b.dataset.pop;
+  if (act === 'nav') return openNav([s]);
+  map.closePopup();
+  if (act === 'done') setStatus(s, 'delivered');
+  if (act === 'restore') { setStatus(s, 'pending'); invalidateRoute(); }
+  save();
+  render();
 });
 
 function updateRouteInfo() {
   const el = $('#routeInfo');
   const r = state.route;
-  const pending = state.stops.filter((s) => s.status !== 'delivered' && s.lat != null).length;
-  if (!r) {
-    el.innerHTML = pending ? `Точек к доставке: <b>${pending}</b>. Маршрут не построен.` : 'Нет точек для маршрута';
-    return;
-  }
-  el.innerHTML = `Маршрут: <b>${fmtKm(r.distance)}</b> · <b>${fmtTime(r.duration)}</b> · ${pending} точек${r.source === 'local' ? ' <span class="warn">(приблизительно, сервер маршрутов недоступен)</span>' : ''}`;
+  const n = state.stops.filter((s) => isOpen(s) && hasPos(s)).length;
+  if (!n) { el.textContent = t('route_nopoints'); return; }
+  if (!r) { el.textContent = t('route_none', { n }); return; }
+  el.innerHTML = t('route_info', { dist: fmtDist(r.distance), time: fmtTime(r.duration), n })
+    + (r.source === 'local' ? `<span class="warn">${esc(t('route_approx'))}</span>` : '');
 }
 
 function locate(center = false) {
@@ -399,9 +574,14 @@ function locate(center = false) {
       (p) => {
         myPos = { lat: p.coords.latitude, lon: p.coords.longitude };
         if (map) {
-          if (!meMarker) meMarker = L.marker([myPos.lat, myPos.lon], { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18] }), interactive: false, zIndexOffset: -100 }).addTo(map);
-          else meMarker.setLatLng([myPos.lat, myPos.lon]);
-          if (center) map.setView([myPos.lat, myPos.lon], 14);
+          if (!meMarker) {
+            meMarker = L.marker([myPos.lat, myPos.lon], {
+              icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18] }),
+              interactive: false,
+              zIndexOffset: -100,
+            }).addTo(map);
+          } else meMarker.setLatLng([myPos.lat, myPos.lon]);
+          if (center) map.setView([myPos.lat, myPos.lon], 15);
         }
         resolve(myPos);
       },
@@ -411,11 +591,10 @@ function locate(center = false) {
   });
 }
 $('#btnLocate').addEventListener('click', async () => {
-  const p = await locate(true);
-  if (!p) toast('Не удалось определить местоположение');
+  if (!(await locate(true))) toast(t('locate_failed'));
 });
 
-/* ---- ручная установка точки ---- */
+/* ---- Punkt manuell setzen ---- */
 function startPlacing(id) {
   const s = state.stops.find((x) => x.id === id);
   if (!s) return;
@@ -439,39 +618,37 @@ async function onMapClick(e) {
   invalidateRoute();
   save();
   render();
-  toast('Точка установлена');
-  try { s.geoLabel = await reverse(s.lat, s.lon); save(); } catch {}
+  toast(t('point_set'));
+  try { s.geoLabel = await reverse(s.lat, s.lon, getLang()); save(); } catch {}
 }
 
-/* ---------------- Маршрут ---------------- */
+/* ---------------- Route ---------------- */
 
 async function optimize() {
-  const pending = state.stops.filter((s) => s.status !== 'delivered' && s.lat != null);
-  if (!pending.length) return toast('Нет адресов с координатами');
-  const btns = [$('#btnRoute'), $('#btnOptimize')];
+  const pending = state.stops.filter((s) => isOpen(s) && hasPos(s));
+  if (!pending.length) return toast(t('route_nopoints'));
+  const btns = [$('#btnRoute'), $('#btnOptimizeTop')];
   btns.forEach((b) => { b.disabled = true; });
-  const oldText = $('#btnRoute').textContent;
-  $('#btnRoute').textContent = 'Строю…';
+  const label = $('#btnRoute span');
+  const labelKey = label.dataset.i18n;
+  label.textContent = t('route_building');
   try {
     let start = null;
     if (state.settings.start === 'gps') {
       start = await locate();
-      if (!start) toast('GPS недоступен — старт с первой точки');
+      if (!start) toast(t('gps_unavailable'));
     }
     const points = start ? [{ ...start, id: '__start' }, ...pending] : pending;
     const r = await buildRoute(points, { roundtrip: state.settings.roundtrip });
-    const orderedStops = r.order.map((i) => points[i]).filter((p) => p.id !== '__start');
+    const ordered = r.order.map((i) => points[i]).filter((p) => p.id !== '__start');
     const legsById = {};
-    // legs[k] — участок от k-й к (k+1)-й точке в порядке обхода
     r.order.forEach((pi, k) => {
-      if (k === 0 && start) return;
-      const p = points[pi];
       const leg = r.legs[k - 1];
-      if (leg) legsById[p.id] = leg;
+      if (leg && points[pi].id !== '__start') legsById[points[pi].id] = leg;
     });
-    const noCoords = state.stops.filter((s) => s.status !== 'delivered' && s.lat == null);
-    const delivered = state.stops.filter((s) => s.status === 'delivered');
-    state.stops = [...orderedStops, ...noCoords, ...delivered];
+    const noPos = state.stops.filter((s) => isOpen(s) && !hasPos(s));
+    const done = state.stops.filter((s) => !isOpen(s));
+    state.stops = [...ordered, ...noPos, ...done];
     state.route = { geometry: r.geometry, distance: r.distance, duration: r.duration, source: r.source, legsById, builtAt: Date.now() };
     save();
     render();
@@ -479,53 +656,54 @@ async function optimize() {
       const b = L.latLngBounds(r.geometry);
       if (b.isValid()) map.fitBounds(b, FIT);
     }
-    toast(`Маршрут построен: ${fmtKm(r.distance)}, ${fmtTime(r.duration)}`);
+    toast(t('route_built', { dist: fmtDist(r.distance), time: fmtTime(r.duration) }));
   } catch (err) {
     console.error(err);
-    toast('Не удалось построить маршрут');
+    toast(t('route_failed'));
   } finally {
     btns.forEach((b) => { b.disabled = false; });
-    $('#btnRoute').textContent = oldText;
+    label.textContent = t(labelKey);
   }
 }
 $('#btnRoute').addEventListener('click', optimize);
-$('#btnOptimize').addEventListener('click', async () => { await optimize(); });
+$('#btnOptimizeTop').addEventListener('click', optimize);
 
-/* ---------------- Навигатор ---------------- */
+/* ---------------- Navigation ---------------- */
+
+const NAV_NAMES = { apple: 'Apple Karten', google: 'Google Maps', waze: 'Waze' };
 
 function navUrl(points) {
   const nav = state.settings.nav;
+  const first = points[0];
+  if (nav === 'apple') return `https://maps.apple.com/?daddr=${first.lat},${first.lon}&dirflg=d`;
+  if (nav === 'waze') return `https://waze.com/ul?ll=${first.lat},${first.lon}&navigate=yes`;
   const last = points[points.length - 1];
-  if (nav === 'google') {
-    const p = new URLSearchParams({ api: '1', destination: `${last.lat},${last.lon}`, travelmode: 'driving' });
-    const way = points.slice(0, -1).slice(0, 9);
-    if (way.length) p.set('waypoints', way.map((s) => `${s.lat},${s.lon}`).join('|'));
-    return 'https://www.google.com/maps/dir/?' + p;
-  }
-  if (nav === '2gis') {
-    return `https://2gis.ru/routeSearch/rsType/car/to/${last.lon},${last.lat}`;
-  }
-  // Яндекс: пустая первая точка = «от моего местоположения»
-  return 'https://yandex.ru/maps/?rtt=auto&rtext=' + ['', ...points.map((s) => `${s.lat},${s.lon}`)].join('~');
+  const p = new URLSearchParams({ api: '1', destination: `${last.lat},${last.lon}`, travelmode: 'driving' });
+  const way = points.slice(0, -1).slice(0, 9);
+  if (way.length) p.set('waypoints', way.map((s) => `${s.lat},${s.lon}`).join('|'));
+  return 'https://www.google.com/maps/dir/?' + p;
 }
 
 function openNav(points) {
-  if (!points.length) return toast('Нет точек');
+  if (!points.length) return toast(t('no_stops'));
   window.open(navUrl(points), '_blank');
 }
+
 $('#btnOpenNav').addEventListener('click', () => {
-  const pending = state.stops.filter((s) => s.status !== 'delivered' && s.lat != null);
-  if (!pending.length) return toast('Нет точек');
-  // В навигатор передаём ближайшие точки по порядку (у сервисов есть лимит на число точек)
-  const limit = state.settings.nav === 'google' ? 10 : state.settings.nav === '2gis' ? 1 : 20;
-  openNav(pending.slice(0, limit));
+  const pending = state.stops.filter((s) => isOpen(s) && hasPos(s));
+  if (!pending.length) return toast(t('no_stops'));
+  if (state.settings.nav === 'google') return openNav(pending.slice(0, 10));
+  if (pending.length > 1) toast(t('single_dest', { app: NAV_NAMES[state.settings.nav] }), 3500);
+  openNav([pending[0]]);
 });
 
-/* ---------------- Настройки ---------------- */
+/* ---------------- Einstellungen ---------------- */
 
 const dlgS = $('#dlgSettings');
 $('#btnSettings').addEventListener('click', () => {
   const s = state.settings;
+  $('#setLang').value = s.lang;
+  $('#setOcr').value = s.ocr;
   $('#setCity').value = s.city;
   $('#setCountry').value = s.country;
   $('#setStart').value = s.start;
@@ -536,6 +714,8 @@ $('#btnSettings').addEventListener('click', () => {
 });
 $('#btnSaveSettings').addEventListener('click', () => {
   Object.assign(state.settings, {
+    lang: $('#setLang').value,
+    ocr: $('#setOcr').value,
     city: $('#setCity').value.trim(),
     country: $('#setCountry').value.trim().toLowerCase(),
     start: $('#setStart').value,
@@ -544,10 +724,13 @@ $('#btnSaveSettings').addEventListener('click', () => {
     autoAdd: $('#setAutoAdd').checked,
   });
   save();
-  toast('Настройки сохранены');
+  setLang(state.settings.lang);
+  showView(currentView);
+  render();
+  toast(t('saved'));
 });
 $('#btnClearAll').addEventListener('click', () => {
-  if (!confirm('Удалить все адреса из списка?')) return;
+  if (!confirm(t('confirm_clear_all'))) return;
   state.stops = [];
   state.route = null;
   save();
@@ -555,11 +738,12 @@ $('#btnClearAll').addEventListener('click', () => {
   dlgS.close();
 });
 
-/* ---------------- Старт ---------------- */
+/* ---------------- Start ---------------- */
 
+setLang(state.settings.lang);
 render();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-// Для автотестов
+// für automatisierte Tests
 window.__app = { state: () => state, render, optimize };
