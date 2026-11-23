@@ -48,6 +48,9 @@ function load() {
   if (!['apple', 'google', 'waze'].includes(s.settings.nav)) s.settings.nav = defaults.settings.nav;
   if (!['de', 'ru'].includes(s.settings.lang)) s.settings.lang = 'de';
   for (const st of s.stops) if (st.express && !st.service) st.service = 'express';
+  // Adressen aus älteren Versionen ins Adressbuch übernehmen
+  s.book = s.book || {};
+  if (!Object.keys(s.book).length) for (const st of s.stops) remember(s.book, st);
   return s;
 }
 function save() {
