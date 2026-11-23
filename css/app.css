@@ -57,7 +57,7 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 button { font: inherit; color: inherit; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
-button svg, .tab svg, .empty-icon svg, .install-hint svg, .photo-drop svg {
+.btn svg, button svg, .tab svg, .empty-icon svg, .install-hint svg, .photo-drop svg {
   width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none;
 }
 
@@ -355,3 +355,19 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .4); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .btn { text-decoration: none; }
+
+/* ---------- Express ---------- */
+:root { --express: #ff3b30; --express-soft: rgba(255, 59, 48, .12); }
+@media (prefers-color-scheme: dark) { :root { --express: #ff453a; --express-soft: rgba(255, 69, 58, .2); } }
+.chip.express { background: var(--express); color: #fff; font-weight: 700; }
+.next-card .badge.express, .row.express .badge { background: var(--express); }
+.row.express { background: var(--express-soft); }
+.xp { margin-right: 4px; }
+.next-more .btn.on, .row-actions .btn.xp-on { color: var(--express); }
+.row-actions .btn.xp-on { background: var(--express-soft); }
+.pin.express { background: var(--express); }
+.express-switch b { display: block; font-weight: 600; }
+.express-switch small { display: block; color: var(--muted); font-size: 13px; }
+.express-switch input:checked + i { background: var(--express); }
+.next-more .btn { flex-direction: column; gap: 3px; min-height: 54px; font-size: 12px; font-weight: 600; padding: 4px 2px; }
+.next-more svg { width: 22px; height: 22px; }

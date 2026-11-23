@@ -250,8 +250,20 @@ function extractRussian(lines) {
 
 /* ===================== API ===================== */
 
-/** Liefert { address, name, phone, note, confidence } aus dem OCR-Text. */
+// Express-/Prioritätssendungen (DHL Express, GLS Express, DPD Express 10:00/12:00, UPS Express Saver …)
+const EXPRESS_RE = /(^|[^\p{L}])(express|expr\.|expresszustellung|priority|priorit[äa]t|prio|same[\s-]?day|sameday|overnight|next[\s-]?flight|time\s?definite|vor\s*(?:8|9|10|11|12)(?::00)?\s*uhr|bis\s*(?:8|9|10|11|12)(?::00)?\s*uhr|(?:8|9|10|12):00\s*(?:uhr|express)|экспресс|срочн)(?![\p{L}])/iu;
+
+/** true, wenn das Etikett eine Express-/Prioritätssendung kennzeichnet. */
+export function detectExpress(text) {
+  return EXPRESS_RE.test(String(text || ''));
+}
+
+/** Liefert { address, name, phone, note, confidence, express } aus dem OCR-Text. */
 export function extractAddress(text) {
+  return { ...extractAddressInner(text), express: detectExpress(text) };
+}
+
+function extractAddressInner(text) {
   const lines = String(text || '').split(/\r?\n/).map(fixOcr).filter(Boolean);
   const phone = extractPhone(lines.join('\n'));
   const de = extractGerman(lines);

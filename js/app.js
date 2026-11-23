@@ -78,6 +78,7 @@ const ICON = {
   del: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
 };
 
 /* ---------------- Ansichten ---------------- */
@@ -136,6 +137,7 @@ function render() {
 function chipsHtml(s) {
   const leg = state.route?.legsById?.[s.id];
   const chips = [];
+  if (s.express) chips.push(`<span class="chip express">⚡ Express</span>`);
   if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
   if (leg) chips.push(`<span class="chip">${fmtDist(leg.distance)} · ${fmtTime(leg.duration)}</span>`);
   if (s.note) chips.push(`<span class="chip">${esc(s.note)}</span>`);
@@ -146,7 +148,7 @@ function nextCardHtml(s) {
   const { street, city } = splitAddr(s.address);
   return `
     <div class="next-head" data-id="${s.id}">
-      <div class="badge">1</div>
+      <div class="badge ${s.express ? 'express' : ''}">1</div>
       <div>
         <div class="street">${esc(street)}</div>
         ${city ? `<div class="city">${esc(city)}</div>` : ''}
@@ -164,6 +166,7 @@ function nextCardHtml(s) {
     <div class="next-more" data-id="${s.id}">
       ${s.phone ? `<a class="btn plain" href="tel:${esc(s.phone)}">${ICON.phone}<span>${t('call')}</span></a>` : ''}
       <button class="btn plain" data-act="show" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}<span>${t('show_on_map')}</span></button>
+      <button class="btn plain ${s.express ? 'on' : ''}" data-act="express">${ICON.bolt}<span>Express</span></button>
       <button class="btn plain" data-act="edit">${ICON.edit}<span>${t('edit')}</span></button>
     </div>`;
 }
@@ -172,7 +175,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
   const { street, city } = splitAddr(s.address);
   const leg = state.route?.legsById?.[s.id];
   const sub = [s.name, city].filter(Boolean).map(esc).join(' · ');
-  const cls = ['row', s.status, hasPos(s) ? '' : 'nocoords', openId === s.id ? 'open' : ''].join(' ');
+  const cls = ['row', s.status, hasPos(s) ? '' : 'nocoords', s.express && isOpen(s) ? 'express' : '', openId === s.id ? 'open' : ''].join(' ');
   const badge = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : num;
   const actions = isOpen(s)
     ? `<div class="ra-main">
@@ -185,6 +188,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
          <button class="btn icon-only" data-act="show" aria-label="${t('show_on_map')}" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}</button>
          <button class="btn icon-only" data-act="up" aria-label="${t('up')}" ${first ? 'disabled' : ''}>${ICON.up}</button>
          <button class="btn icon-only" data-act="down" aria-label="${t('down')}" ${last ? 'disabled' : ''}>${ICON.down}</button>
+         <button class="btn icon-only ${s.express ? 'xp-on' : ''}" data-act="express" aria-label="Express">${ICON.bolt}</button>
          <button class="btn icon-only" data-act="edit" aria-label="${t('edit')}">${ICON.edit}</button>
          <button class="btn icon-only danger" data-act="del" aria-label="${t('delete')}">${ICON.del}</button>
        </div>`
@@ -197,7 +201,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
       <button class="row-main" data-act="toggle">
         <span class="badge">${badge}</span>
         <span class="row-text">
-          <span class="row-street" style="display:block">${esc(street)}</span>
+          <span class="row-street" style="display:block">${s.express && isOpen(s) ? '<span class="xp">⚡</span>' : ''}${esc(street)}</span>
           <span class="row-sub" style="display:block">${hasPos(s) ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}</span>
         </span>
         ${leg && isOpen(s) ? `<span class="row-eta">${fmtDist(leg.distance)}<br>${fmtTime(leg.duration)}</span>` : ''}
@@ -207,18 +211,21 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
     </li>`;
 }
 
-function setStatus(s, status) {
+/** Stopp an die passende Stelle einreihen: Express hinter die letzten Express-Stopps, sonst vor die erledigten. */
+function placeStop(s) {
   const i = state.stops.indexOf(s);
+  if (i >= 0) state.stops.splice(i, 1);
+  if (!isOpen(s)) { state.stops.push(s); return; }
+  const pos = s.express
+    ? state.stops.findIndex((x) => !isOpen(x) || !x.express)
+    : state.stops.findIndex((x) => !isOpen(x));
+  state.stops.splice(pos < 0 ? state.stops.length : pos, 0, s);
+}
+
+function setStatus(s, status) {
   s.status = status;
   s.doneAt = status === 'pending' ? null : Date.now();
-  state.stops.splice(i, 1);
-  if (status === 'pending') {
-    // vor die erledigten einreihen
-    const firstDone = state.stops.findIndex((x) => !isOpen(x));
-    state.stops.splice(firstDone < 0 ? state.stops.length : firstDone, 0, s);
-  } else {
-    state.stops.push(s);
-  }
+  placeStop(s);
   if (state.route?.legsById) delete state.route.legsById[s.id];
   openId = null;
 }
@@ -232,6 +239,12 @@ function handleAction(act, id) {
     case 'toggle': openId = openId === id ? null : id; break;
     case 'done': setStatus(s, 'delivered'); break;
     case 'fail': setStatus(s, 'failed'); break;
+    case 'express':
+      s.express = !s.express;
+      placeStop(s);
+      invalidateRoute();
+      toast(s.express ? t('express_on') : t('express_off'));
+      break;
     case 'restore': setStatus(s, 'pending'); invalidateRoute(); break;
     case 'nav': openNav([s]); return;
     case 'place': startPlacing(s.id); return;
@@ -290,6 +303,7 @@ function resetForm() {
   $('#nameInput').value = editing?.name || '';
   $('#phoneInput').value = editing?.phone || '';
   $('#noteInput').value = editing?.note || '';
+  $('#expressInput').checked = !!editing?.express;
   $('#rawBox').hidden = true;
   $('#rawBox').open = false;
   $('#rawText').textContent = '';
@@ -406,6 +420,7 @@ async function processText(text) {
   if (r.name) $('#nameInput').value = r.name;
   if (r.phone) $('#phoneInput').value = r.phone;
   if (r.note) $('#noteInput').value = r.note;
+  if (r.express) $('#expressInput').checked = true;
   if (r.confidence === 'low') $('#rawBox').open = true;
   await findCandidates({ auto: state.settings.autoAdd && r.confidence !== 'low' });
 }
@@ -463,22 +478,24 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
     name: $('#nameInput').value.trim(),
     phone: $('#phoneInput').value.trim(),
     note: $('#noteInput').value.trim(),
+    express: $('#expressInput').checked,
   };
   let stop;
   const wasEdit = !!editing;
   if (editing) {
+    const wasExpress = !!editing.express;
     stop = Object.assign(editing, data);
     if (c) { stop.lat = c.lat; stop.lon = c.lon; stop.geoLabel = c.label; }
+    if (wasExpress !== stop.express) placeStop(stop);
   } else {
     if (state.stops.some((s) => s.address.toLowerCase() === address.toLowerCase()) && !confirm(t('duplicate'))) return;
     stop = { id: uid(), ...data, lat: c?.lat ?? null, lon: c?.lon ?? null, geoLabel: c?.label || '', status: 'pending', createdAt: Date.now() };
-    const firstDone = state.stops.findIndex((s) => !isOpen(s));
-    state.stops.splice(firstDone < 0 ? state.stops.length : firstDone, 0, stop);
+    placeStop(stop);
   }
   invalidateRoute();
   save();
   render();
-  if (!wasEdit) toast(t('added', { a: splitAddr(address).street }));
+  if (!wasEdit) toast((stop.express ? '⚡ ' : '') + t('added', { a: splitAddr(address).street }));
 
   if (next || stayOpen) {
     editing = null;
@@ -519,7 +536,7 @@ function initMap() {
 }
 
 function pinIcon(label, cls) {
-  const big = cls === 'next';
+  const big = cls.includes('next');
   const small = cls === 'delivered' || cls === 'failed';
   const size = big ? 40 : small ? 24 : 32;
   return L.divIcon({
@@ -539,12 +556,12 @@ function renderMap() {
   state.stops.forEach((s) => {
     if (!hasPos(s)) return;
     const n = pending.indexOf(s) + 1;
-    const cls = s.status === 'pending' ? (n === 1 ? 'next' : '') : s.status;
+    const cls = s.status === 'pending' ? [n === 1 ? 'next' : '', s.express ? 'express' : ''].join(' ').trim() : s.status;
     const label = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : n;
     const m = L.marker([s.lat, s.lon], {
       icon: pinIcon(label, cls),
       draggable: true,
-      zIndexOffset: cls === 'next' ? 1000 : isOpen(s) ? 500 : 0,
+      zIndexOffset: cls.includes('next') ? 1000 : s.express && isOpen(s) ? 800 : isOpen(s) ? 500 : 0,
     }).addTo(map);
     const { street, city } = splitAddr(s.address);
     m.bindPopup(`
@@ -659,7 +676,8 @@ async function onMapClick(e) {
 /* ---------------- Route ---------------- */
 
 async function optimize() {
-  const pending = state.stops.filter((s) => isOpen(s) && hasPos(s));
+  // Express zuerst (wichtig, falls ohne GPS beim ersten Stopp gestartet wird)
+  const pending = state.stops.filter((s) => isOpen(s) && hasPos(s)).sort((a, b) => (b.express ? 1 : 0) - (a.express ? 1 : 0));
   if (!pending.length) return toast(t('route_nopoints'));
   const btns = [$('#btnRoute'), $('#btnOptimizeTop')];
   btns.forEach((b) => { b.disabled = true; });

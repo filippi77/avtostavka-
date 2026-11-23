@@ -90,3 +90,17 @@ test('Suchvarianten', () => {
   assert.ok(q.includes('Hauptstraße 12a, Berlin'));
   assert.equal(geocodeQueries('Lindenweg 3', 'Potsdam')[0], 'Lindenweg 3, Potsdam');
 });
+
+test('Express-Erkennung', async () => {
+  const { detectExpress } = await import('../js/address.js');
+  for (const t of ['DHL EXPRESS', 'GLS Express 10:00', 'DPD Express vor 12 Uhr', 'Zustellung bis 10:00 Uhr', 'PRIORITY', 'UPS Express Saver', 'Экспресс-доставка']) {
+    assert.equal(detectExpress(t), true, t);
+  }
+  for (const t of ['DHL Paket', 'Hermes', 'Expressweg 5\n10115 Berlin'.replace('Expressweg', 'Exportweg'), 'Gewicht 2 kg', 'Prioritätsstraße'.replace('Prioritäts', 'Pracht')]) {
+    assert.equal(detectExpress(t), false, t);
+  }
+  const r = extractAddress('DHL EXPRESS\nEmpfänger:\nAnna Schmidt\nHauptstraße 12a\n10115 Berlin');
+  assert.equal(r.express, true);
+  assert.equal(r.address, 'Hauptstraße 12a, 10115 Berlin');
+  assert.equal(extractAddress('Anna Schmidt\nHauptstraße 12a\n10115 Berlin').express, false);
+});

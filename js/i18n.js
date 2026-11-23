@@ -110,6 +110,10 @@ const dict = {
     confirm_clear_all: 'Wirklich alle Stopps löschen?',
     saved: 'Gespeichert',
     install_ios: 'Als App installieren: unten auf <b>Teilen</b> tippen und <b>„Zum Home-Bildschirm“</b> wählen.',
+    express_label: 'Express-Paket',
+    express_hint: 'Wird in der Route immer zuerst angefahren',
+    express_on: '⚡ Express – kommt an den Anfang der Tour',
+    express_off: 'Express entfernt',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -221,6 +225,10 @@ const dict = {
     confirm_clear_all: 'Удалить все адреса?',
     saved: 'Сохранено',
     install_ios: 'Установить как приложение: нажмите <b>«Поделиться»</b> внизу и выберите <b>«На экран „Домой“»</b>.',
+    express_label: 'Экспресс-посылка',
+    express_hint: 'В маршруте всегда идёт первой',
+    express_on: '⚡ Экспресс — в начало маршрута',
+    express_off: 'Экспресс снят',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

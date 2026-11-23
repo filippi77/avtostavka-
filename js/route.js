@@ -19,27 +19,43 @@ function pathCost(order, D, roundtrip) {
 }
 
 /**
- * Порядок обхода точек. Индекс 0 — старт (фиксирован).
- * D — матрица стоимостей (может быть несимметричной).
- * Возвращает массив индексов, начинающийся с 0.
+ * Reihenfolge der Stopps. Index 0 = Start (fest).
+ * D — Kostenmatrix (darf asymmetrisch sein).
+ * priority[i] — Priorität (0 = Express zuerst, 1 = normal). Alle Stopps mit
+ * Priorität 0 werden vor allen mit Priorität 1 angefahren.
+ * Liefert Indizes, beginnend mit 0.
  */
-export function optimizeOrder(D, roundtrip = false) {
+export function optimizeOrder(D, roundtrip = false, priority = null) {
   const n = D.length;
   if (n <= 2) return [...Array(n).keys()];
+  const prio = (i) => (i === 0 || !priority ? 0 : priority[i] || 0);
 
-  // Ближайший сосед
+  // Strafe für jeden Übergang normal → Express: so bleibt jede Lösung mit
+  // "Express zuerst" immer günstiger als jede andere.
+  let M = D;
+  if (priority && priority.some((p) => p)) {
+    let max = 0;
+    for (const row of D) for (const v of row) if (v < 1e8 && v > max) max = v;
+    const BIG = (max + 1) * n * 4;
+    M = D.map((row, i) => row.map((v, j) => (j !== 0 && prio(i) > prio(j) ? v + BIG : v)));
+  }
+
+  // Nächster Nachbar, gruppenweise (erst Express, dann normal)
   const used = new Array(n).fill(false);
   let order = [0];
   used[0] = true;
   for (let k = 1; k < n; k++) {
     const last = order[order.length - 1];
+    let minPrio = Infinity;
+    for (let j = 1; j < n; j++) if (!used[j]) minPrio = Math.min(minPrio, prio(j));
     let best = -1;
     for (let j = 0; j < n; j++) {
-      if (!used[j] && (best < 0 || D[last][j] < D[last][best])) best = j;
+      if (!used[j] && prio(j) === minPrio && (best < 0 || D[last][j] < D[last][best])) best = j;
     }
     used[best] = true;
     order.push(best);
   }
+  D = M;
 
   // 2-opt + перемещение одной точки (or-opt), пока есть улучшение
   let cost = pathCost(order, D, roundtrip);
@@ -87,6 +103,8 @@ async function fetchJson(url, timeoutMs = 15000) {
  * Возвращает { order, geometry: [[lat,lon],...], distance, duration, source }.
  */
 export async function buildRoute(points, { roundtrip = false } = {}) {
+  // points[i].express === true → Express-Stopp, wird zuerst angefahren
+  const priority = points.map((p, i) => (i > 0 && !p.express ? 1 : 0));
   let D = null;
   let source = 'osrm';
   try {
@@ -99,7 +117,7 @@ export async function buildRoute(points, { roundtrip = false } = {}) {
     D = points.map((a) => points.map((b) => haversine(a, b)));
   }
 
-  const order = optimizeOrder(D, roundtrip);
+  const order = optimizeOrder(D, roundtrip, priority);
   const ordered = order.map((i) => points[i]);
   if (roundtrip) ordered.push(points[0]);
 

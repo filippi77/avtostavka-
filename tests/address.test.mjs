@@ -74,3 +74,29 @@ test('оптимизация: не хуже ближайшего соседа н
   assert.equal(order[0], 0);
   assert.equal(new Set(order).size, 30);
 });
+
+test('Express-Stopps werden immer zuerst angefahren', () => {
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let run = 0; run < 20; run++) {
+    const n = 25;
+    const pts = Array.from({ length: n }, () => ({ lat: 52.4 + rnd() * 0.2, lon: 13.2 + rnd() * 0.3 }));
+    const D = pts.map((a) => pts.map((b) => haversine(a, b) * (1 + rnd() * 0.2)));
+    const prio = pts.map((_, i) => (i === 0 ? 0 : rnd() < 0.25 ? 0 : 1));
+    const order = optimizeOrder(D, run % 2 === 1, prio);
+    assert.equal(order[0], 0);
+    assert.equal(new Set(order).size, n);
+    const firstNormal = order.findIndex((i) => i !== 0 && prio[i] === 1);
+    const lastExpress = order.reduce((acc, i, k) => (i !== 0 && prio[i] === 0 ? k : acc), -1);
+    assert.ok(firstNormal < 0 || lastExpress < firstNormal, `Express nach normal in Lauf ${run}`);
+  }
+});
+
+test('Express ganz weit weg wird trotzdem zuerst angefahren', () => {
+  // Start bei 0, normale Stopps 1..4 auf dem Weg, Express (5) am anderen Ende
+  const pts = [0, 1, 2, 3, 4, 10].map((x) => ({ lat: 52, lon: 13 + x * 0.01 }));
+  const D = pts.map((a) => pts.map((b) => haversine(a, b)));
+  const order = optimizeOrder(D, false, [0, 1, 1, 1, 1, 0]);
+  assert.equal(order[1], 5);
+  assert.deepEqual(order, [0, 5, 4, 3, 2, 1]);
+});
