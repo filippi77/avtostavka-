@@ -522,3 +522,10 @@ body { background: var(--bg); }
 .sug-text small { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sug-dist { font-size: 13px; color: var(--muted); flex: none; }
 .sug-empty { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+
+/* Dunkle Karte im Dark Mode (helle OSM-Kacheln invertiert) */
+@media (prefers-color-scheme: dark) {
+  .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.7); }
+}
+#map { background: #e9e4dc; }
+@media (prefers-color-scheme: dark) { #map { background: #1b1714; } }

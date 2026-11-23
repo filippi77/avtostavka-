@@ -665,15 +665,33 @@ function initMap() {
   if (map) return;
   if (!window.L) { toast(t('map_failed')); return; }
   map = L.map('map', { zoomControl: false }).setView([51.1657, 10.4515], 6);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 20,
-    subdomains: 'abcd',
-    attribution: '© OpenStreetMap · © CARTO',
-  }).addTo(map);
+  addBaseLayer(0);
   map.on('click', onMapClick);
   const pts = state.stops.filter(hasPos);
   if (pts.length) map.fitBounds(pts.map((s) => [s.lat, s.lon]), FIT);
   locate(!pts.length);
+}
+
+// Kartenkacheln ohne API-Schlüssel. Fällt ein Server aus, wird automatisch der nächste genommen.
+const TILE_SOURCES = [
+  { url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', maxZoom: 19, attribution: '© OpenStreetMap-Mitwirkende' },
+  { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', maxZoom: 19, attribution: '© OpenStreetMap contributors' },
+];
+let baseLayer = null;
+
+function addBaseLayer(i) {
+  const src = TILE_SOURCES[i];
+  if (!src || !map) return;
+  if (baseLayer) baseLayer.remove();
+  let errors = 0;
+  let loaded = 0;
+  baseLayer = L.tileLayer(src.url, { maxZoom: src.maxZoom, attribution: src.attribution })
+    .on('tileload', () => { loaded++; })
+    .on('tileerror', () => {
+      // mehrere Fehler ohne erfolgreich geladene Kachel → nächsten Server versuchen
+      if (++errors >= 4 && loaded === 0 && i + 1 < TILE_SOURCES.length) addBaseLayer(i + 1);
+    })
+    .addTo(map);
 }
 
 function pinIcon(label, cls) {
