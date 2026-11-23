@@ -1,0 +1,11 @@
+{
+  "name": "avtostavka",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PWA для курьера: сканирование адресов с этикеток, карта, оптимальный маршрут",
+  "scripts": {
+    "start": "npx --yes http-server -c-1 -p 8080 .",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

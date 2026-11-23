@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Автоставка</title>
+  <meta name="description" content="Сканирование адресов с этикеток посылок, карта и маршрут доставки">
+  <meta name="theme-color" content="#1f6feb">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Автоставка</h1>
+    <div class="summary" id="summary"></div>
+    <button class="icon-btn" id="btnSettings" aria-label="Настройки">
+      <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5.1-1-.1-1 2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11l-.1 1 .1 1-2.1 1.6 2 3.5 2.5-1a7 7 0 0 0 1.7 1L11 21h4l.4-2.6a7 7 0 0 0 1.7-1l2.5 1 2-3.5-2.2-1.6Z"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <!-- Список -->
+    <section class="view active" id="view-list">
+      <div class="list-actions">
+        <button class="btn primary big" id="btnScan">
+          <svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M7 12h10"/></svg>
+          Сканировать этикетку
+        </button>
+        <button class="btn" id="btnManual">Ввести адрес</button>
+      </div>
+      <div class="empty" id="emptyList">
+        <p><b>Список пуст.</b></p>
+        <p>Сфотографируйте этикетку посылки — приложение распознает адрес, найдёт его на карте и добавит в маршрут.</p>
+      </div>
+      <ol class="stops" id="stops"></ol>
+      <div class="list-footer" id="listFooter">
+        <button class="btn" id="btnOptimize">Построить оптимальный маршрут</button>
+        <button class="btn ghost danger" id="btnClearDelivered">Убрать доставленные</button>
+      </div>
+    </section>
+
+    <!-- Карта -->
+    <section class="view" id="view-map">
+      <div id="map"></div>
+      <div class="map-panel">
+        <div class="route-info" id="routeInfo">Маршрут не построен</div>
+        <div class="map-buttons">
+          <button class="btn primary" id="btnRoute">Маршрут</button>
+          <button class="btn" id="btnOpenNav">Навигатор</button>
+          <button class="icon-btn" id="btnLocate" aria-label="Моё местоположение">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5" fill="none"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="place-hint" id="placeHint" hidden>
+        Коснитесь карты, чтобы указать точку для: <b id="placeHintAddr"></b>
+        <button class="btn small" id="btnPlaceCancel">Отмена</button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab active" data-view="list">
+      <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>
+      Список
+    </button>
+    <button class="tab scan" id="tabScan" aria-label="Сканировать">
+      <svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+    <button class="tab" data-view="map">
+      <svg viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Zm0 0v14m6-12v14"/></svg>
+      Карта
+    </button>
+  </nav>
+
+  <input type="file" accept="image/*" capture="environment" id="fileCamera" hidden>
+  <input type="file" accept="image/*" id="fileGallery" hidden>
+
+  <!-- Окно сканирования / добавления -->
+  <dialog id="dlgAdd" class="sheet">
+    <form method="dialog" class="sheet-body" id="addForm">
+      <div class="sheet-head">
+        <h2 id="addTitle">Новая посылка</h2>
+        <button class="icon-btn" value="cancel" aria-label="Закрыть">✕</button>
+      </div>
+
+      <div class="scan-src" id="scanSrc">
+        <button type="button" class="btn primary" id="btnCamera">📷 Камера</button>
+        <button type="button" class="btn" id="btnGallery">🖼 Из галереи</button>
+      </div>
+
+      <div class="progress" id="ocrProgress" hidden>
+        <div class="progress-label" id="ocrLabel">Распознавание…</div>
+        <div class="progress-bar"><div id="ocrBar"></div></div>
+      </div>
+
+      <img id="scanPreview" class="scan-preview" alt="" hidden>
+
+      <label class="field">
+        <span>Адрес доставки</span>
+        <textarea id="addrInput" rows="3" placeholder="г. Москва, ул. Тверская, д. 7, кв. 12"></textarea>
+      </label>
+      <div class="row2">
+        <label class="field">
+          <span>Телефон</span>
+          <input id="phoneInput" type="tel" placeholder="+7…">
+        </label>
+        <label class="field">
+          <span>Заметка</span>
+          <input id="noteInput" type="text" placeholder="подъезд, время…">
+        </label>
+      </div>
+
+      <details class="raw" id="rawBox" hidden>
+        <summary>Распознанный текст</summary>
+        <pre id="rawText"></pre>
+        <p class="hint">Выделите нужную строку и скопируйте в поле адреса, если адрес найден неверно.</p>
+      </details>
+
+      <button type="button" class="btn" id="btnFind">Найти на карте</button>
+      <div class="status" id="geoStatus"></div>
+      <ul class="candidates" id="candidates"></ul>
+
+      <div class="sheet-foot">
+        <button type="button" class="btn ghost" id="btnAddNoCoords">Указать на карте вручную</button>
+        <button type="button" class="btn primary" id="btnAdd" disabled>Добавить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Настройки -->
+  <dialog id="dlgSettings" class="sheet">
+    <form method="dialog" class="sheet-body">
+      <div class="sheet-head">
+        <h2>Настройки</h2>
+        <button class="icon-btn" value="cancel" aria-label="Закрыть">✕</button>
+      </div>
+      <label class="field">
+        <span>Город по умолчанию (если на этикетке не указан)</span>
+        <input id="setCity" type="text" placeholder="например, Казань">
+      </label>
+      <label class="field">
+        <span>Страна поиска (код ISO, пусто — везде)</span>
+        <input id="setCountry" type="text" maxlength="20" placeholder="ru">
+      </label>
+      <label class="field">
+        <span>Начало маршрута</span>
+        <select id="setStart">
+          <option value="gps">Моё местоположение (GPS)</option>
+          <option value="first">Первая точка списка</option>
+        </select>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="setRoundtrip"> Вернуться в точку старта
+      </label>
+      <label class="field">
+        <span>Навигатор</span>
+        <select id="setNav">
+          <option value="yandex">Яндекс Карты / Навигатор</option>
+          <option value="google">Google Maps</option>
+          <option value="2gis">2ГИС</option>
+        </select>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="setAutoAdd"> Добавлять сразу, если адрес найден однозначно
+      </label>
+      <div class="sheet-foot">
+        <button type="button" class="btn ghost danger" id="btnClearAll">Очистить весь список</button>
+        <button class="btn primary" value="save" id="btnSaveSettings">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
