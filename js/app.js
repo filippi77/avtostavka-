@@ -1,7 +1,8 @@
 import { extractAddress } from './address.js';
 import { geocode, reverse } from './geocode.js';
 import { suggest } from './autocomplete.js';
-import { buildRoute } from './route.js';
+import { normKey, remember, updatePosition, lookup, searchBook, frequent, pruneBook, autosaveTour, saveNamedTour, restoreStops, today } from './memory.js';
+import { buildRoute, haversine } from './route.js';
 import { recognize, warmUp } from './ocr.js';
 import { t, setLang, getLang, applyI18n, fmtDist, fmtTime } from './i18n.js';
 
@@ -22,6 +23,8 @@ const defaults = {
   stops: [],
   route: null,
   hideInstallHint: false,
+  book: {}, // Adressbuch: häufige Adressen
+  tours: [], // gespeicherte Touren
   settings: {
     lang: 'de',
     ocr: 'deu+eng',
@@ -48,6 +51,8 @@ function load() {
   return s;
 }
 function save() {
+  // Tour des Tages automatisch mitschreiben
+  state.tours = autosaveTour(state.tours || [], state.stops);
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -87,6 +92,7 @@ const ICON = {
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
   road: '<svg viewBox="0 0 24 24"><path d="M5 21 9 3M19 21 15 3M12 4v2M12 10v3M12 17v3"/></svg>',
+  star: '<svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
   bolt: '<svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
 };
 
@@ -404,7 +410,7 @@ $('#btnGallery').addEventListener('click', () => $('#fileGallery').click());
 $('#fileCamera').addEventListener('change', onPhoto);
 $('#fileGallery').addEventListener('change', onPhoto);
 // Tippen auf den abgedunkelten Hintergrund schließt das Sheet
-for (const d of [dlg, $('#dlgSettings')]) {
+for (const d of [dlg, $('#dlgSettings'), $('#dlgTours')]) {
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 }
 
@@ -492,9 +498,46 @@ function hideSuggest() {
   $('#suggest').innerHTML = '';
 }
 
+/** Gespeicherte Adresse → Vorschlag */
+function bookItem(e) {
+  const { street, city } = splitAddr(e.address);
+  return {
+    kind: 'saved', entry: e, main: street, address: e.address, lat: e.lat, lon: e.lon, precision: e.precision,
+    sub: [city, e.name, `${e.count}×`].filter(Boolean).join(' · '),
+    dist: e.lat != null && searchCenter() ? haversine(searchCenter(), e) : null,
+  };
+}
+
+function renderSuggest(items, emptyText = '') {
+  sugItems = items;
+  const ul = $('#suggest');
+  if (!items.length && !emptyText) return hideSuggest();
+  ul.innerHTML = items.length
+    ? items.map((x, i) => `
+      <li><button type="button" class="sug ${x.kind === 'saved' ? 'saved' : ''}" data-i="${i}">
+        <span class="sug-ic">${x.kind === 'saved' ? ICON.star : x.kind === 'street' ? ICON.road : ICON.pin}</span>
+        <span class="sug-text"><b>${esc(x.main)}</b><small>${esc(x.sub)}</small></span>
+        ${x.dist != null ? `<span class="sug-dist">${fmtDist(x.dist)}</span>` : ''}
+      </button></li>`).join('')
+    : `<li class="sug-empty">${esc(emptyText)}</li>`;
+  ul.hidden = false;
+}
+
+/** Leeres Feld: häufigste gespeicherte Adressen zeigen */
+function showFrequent() {
+  if ($('#addrInput').value.trim()) return;
+  const items = frequent(state.book).map(bookItem);
+  if (items.length) renderSuggest(items);
+}
+
 async function runSuggest() {
   const q = $('#addrInput').value.trim();
-  if (q.length < 3 || q === pickedAddress) return hideSuggest();
+  if (!q) return showFrequent();
+  if (q.length < 2 || q === pickedAddress) return hideSuggest();
+  // gespeicherte Adressen sofort (offline, ohne Wartezeit)
+  const local = searchBook(state.book, q).map(bookItem);
+  if (local.length) renderSuggest(local);
+  if (q.length < 3) return;
   sugAbort?.abort();
   sugAbort = new AbortController();
   let query = q;
@@ -505,25 +548,16 @@ async function runSuggest() {
   const radiusKm = +state.settings.radius || 50;
   // Ohne bekannten Standort kurz auf GPS warten, damit der Umkreis greift
   if (!searchCenter()) await Promise.race([locate(), new Promise((r) => setTimeout(r, 3000))]);
+  let remote = [];
   try {
-    sugItems = await suggest(query, { center: searchCenter(), radiusKm, lang: getLang(), signal: sugAbort.signal });
+    remote = await suggest(query, { center: searchCenter(), radiusKm, lang: getLang(), signal: sugAbort.signal });
   } catch (err) {
     if (err.name === 'AbortError') return;
-    sugItems = [];
   }
   if ($('#addrInput').value.trim() !== q) return; // inzwischen weitergetippt
-  const ul = $('#suggest');
-  if (!sugItems.length) {
-    ul.innerHTML = `<li class="sug-empty">${esc(t('no_suggest', { r: radiusKm }))}</li>`;
-  } else {
-    ul.innerHTML = sugItems.map((x, i) => `
-      <li><button type="button" class="sug" data-i="${i}">
-        <span class="sug-ic">${x.kind === 'street' ? ICON.road : ICON.pin}</span>
-        <span class="sug-text"><b>${esc(x.main)}</b><small>${esc(x.sub)}</small></span>
-        ${x.dist != null ? `<span class="sug-dist">${fmtDist(x.dist)}</span>` : ''}
-      </button></li>`).join('');
-  }
-  ul.hidden = false;
+  const known = new Set(local.map((x) => normKey(x.address)));
+  const items = [...local, ...remote.filter((x) => !known.has(normKey(x.address)))].slice(0, 8);
+  renderSuggest(items, t('no_suggest', { r: radiusKm }));
 }
 
 function pickSuggestion(i) {
@@ -541,12 +575,20 @@ function pickSuggestion(i) {
     setGeoStatus(t('enter_number'));
     return;
   }
-  // Haus / Ort gewählt → Koordinaten sind bekannt, direkt hinzufügbar
+  // Haus / gespeicherte Adresse gewählt → Koordinaten sind bekannt, direkt hinzufügbar
   pickedStreet = null;
   pickedAddress = x.address;
   input.value = x.address;
   input.blur();
-  candidates = [{ lat: x.lat, lon: x.lon, label: x.address, precision: x.kind === 'house' ? 'house' : 'street', postcode: x.postcode, city: x.city }];
+  if (x.kind === 'saved') {
+    const e = x.entry;
+    if (!$('#nameInput').value && e.name) $('#nameInput').value = e.name;
+    if (!$('#phoneInput').value && e.phone) $('#phoneInput').value = e.phone;
+    if (!$('#noteInput').value && e.note) $('#noteInput').value = e.note;
+    if (e.lat == null) { setGeoStatus(''); return findCandidates(); }
+  }
+  const precision = x.kind === 'saved' ? x.precision : x.kind === 'house' ? 'house' : 'street';
+  candidates = [{ lat: x.lat, lon: x.lon, label: x.address, precision, postcode: x.postcode, city: x.city }];
   $('#candidates').innerHTML = `<li><label><input type="radio" name="cand" value="0" checked><span>${esc(x.address)}${x.dist != null ? ` · ${fmtDist(x.dist)}` : ''}</span></label></li>`;
   setGeoStatus(t('found_one'));
   setAddEnabled(true);
@@ -566,6 +608,7 @@ $('#addrInput').addEventListener('input', () => {
   sugTimer = setTimeout(runSuggest, 220);
 });
 $('#addrInput').addEventListener('blur', () => setTimeout(hideSuggest, 200));
+$('#addrInput').addEventListener('focus', () => setTimeout(showFrequent, 300));
 $('#suggest').addEventListener('pointerdown', (e) => e.preventDefault()); // Fokus behalten
 $('#suggest').addEventListener('click', (e) => {
   const b = e.target.closest('.sug');
@@ -575,6 +618,16 @@ $('#suggest').addEventListener('click', (e) => {
 async function findCandidates({ auto = false } = {}) {
   const addr = $('#addrInput').value.trim();
   if (!addr) return setGeoStatus(t('enter_address'), true);
+  // schon bekannte Adresse → gespeicherte Position, keine Suche nötig
+  const known = lookup(state.book, addr);
+  if (known?.lat != null) {
+    candidates = [{ lat: known.lat, lon: known.lon, label: '★ ' + known.address, precision: known.precision }];
+    $('#candidates').innerHTML = `<li><label><input type="radio" name="cand" value="0" checked><span>${esc(candidates[0].label)}</span></label></li>`;
+    setGeoStatus(t('from_memory'));
+    setAddEnabled(true);
+    if (auto) commitAdd({ stayOpen: true });
+    return;
+  }
   setGeoStatus(t('searching'));
   $('#candidates').innerHTML = '';
   setAddEnabled(!!editing);
@@ -636,6 +689,8 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
     stop = { id: uid(), ...data, lat: c?.lat ?? null, lon: c?.lon ?? null, geoLabel: c?.label || '', precision: c?.precision || '', status: 'pending', createdAt: Date.now() };
     placeStop(stop);
   }
+  remember(state.book, stop, { count: !wasEdit });
+  pruneBook(state.book);
   invalidateRoute();
   save();
   render();
@@ -743,6 +798,7 @@ function renderMap() {
       s.lat = p.lat;
       s.lon = p.lng;
       s.precision = 'manual';
+      updatePosition(state.book, s);
       invalidateRoute();
       save();
       render();
@@ -835,6 +891,8 @@ async function onMapClick(e) {
   s.lat = e.latlng.lat;
   s.lon = e.latlng.lng;
   s.precision = 'manual';
+  if (lookup(state.book, s.address)) updatePosition(state.book, s);
+  else remember(state.book, s);
   invalidateRoute();
   save();
   render();
@@ -942,6 +1000,131 @@ $('#btnOpenNav').addEventListener('click', () => {
   if (state.settings.nav === 'google') return openNav(pending.slice(0, 10));
   if (pending.length > 1) toast(t('single_dest', { app: NAV_NAMES[state.settings.nav] }), 3500);
   openNav([pending[0]]);
+});
+
+/* ---------------- Touren & Gedächtnis ---------------- */
+
+const dlgT = $('#dlgTours');
+
+function tourTitle(tr) {
+  if (!tr.auto) return tr.name;
+  const d = new Date(tr.date + 'T12:00:00');
+  const diff = Math.round((new Date(today() + 'T12:00:00') - d) / 86400000);
+  if (diff === 0) return t('today');
+  if (diff === 1) return t('yesterday');
+  return d.toLocaleDateString(getLang(), { weekday: 'long', day: '2-digit', month: '2-digit' });
+}
+
+function renderTours() {
+  const list = [...(state.tours || [])].sort((a, b) => b.date.localeCompare(a.date) || (b.savedAt || 0) - (a.savedAt || 0));
+  $('#tourList').innerHTML = list.length
+    ? list.map((tr) => {
+      const done = tr.stops.filter((s) => s.status === 'delivered').length;
+      const date = new Date(tr.date + 'T12:00:00').toLocaleDateString(getLang(), { day: '2-digit', month: '2-digit', year: 'numeric' });
+      return `
+      <li class="tour" data-id="${tr.id}">
+        <div class="tour-text">
+          <b>${tr.auto ? '' : '★ '}${esc(tourTitle(tr))}</b>
+          <small>${esc(tr.auto ? t('tour_auto') + ' · ' + date : date)} · ${t('tour_count', { n: tr.stops.length, d: done })}</small>
+        </div>
+        <div class="tour-actions">
+          <button type="button" class="btn small primary" data-tour="load">${t('tour_load')}</button>
+          <button type="button" class="btn small" data-tour="add" aria-label="${t('tour_add')}">+</button>
+          <button type="button" class="btn small danger" data-tour="del" aria-label="${t('delete')}">${ICON.del}</button>
+        </div>
+      </li>`;
+    }).join('')
+    : `<li class="sug-empty">${esc(t('tours_empty'))}</li>`;
+  $('#bookInfo').textContent = t('book_info', { n: Object.keys(state.book || {}).length });
+}
+
+$('#btnTours').addEventListener('click', () => {
+  $('#tourName').value = '';
+  $('#tourName').placeholder = t('tour_name_ph', { d: new Date().toLocaleDateString(getLang(), { weekday: 'long' }) });
+  renderTours();
+  dlgT.showModal();
+});
+
+$('#btnSaveTour').addEventListener('click', () => {
+  if (!state.stops.length) return toast(t('no_stops'));
+  const name = $('#tourName').value.trim() || $('#tourName').placeholder;
+  state.tours = saveNamedTour(state.tours, state.stops, name);
+  save();
+  renderTours();
+  $('#tourName').value = '';
+  toast(t('tour_saved', { n: name }));
+});
+
+$('#tourList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tour]');
+  if (!b) return;
+  const tr = state.tours.find((x) => x.id === b.closest('.tour').dataset.id);
+  if (!tr) return;
+  const act = b.dataset.tour;
+  if (act === 'del') {
+    if (!confirm(t('tour_confirm_del', { n: tourTitle(tr) }))) return;
+    state.tours = state.tours.filter((x) => x !== tr);
+    save();
+    return renderTours();
+  }
+  const restored = restoreStops(tr);
+  if (act === 'load') {
+    if (state.stops.some(isOpen) && !confirm(t('tour_confirm_replace'))) return;
+    state.stops = restored;
+  } else {
+    const have = new Set(state.stops.map((s) => normKey(s.address)));
+    const add = restored.filter((s) => !have.has(normKey(s.address)));
+    const firstDone = state.stops.findIndex((x) => !isOpen(x));
+    state.stops.splice(firstDone < 0 ? state.stops.length : firstDone, 0, ...add);
+  }
+  state.route = null;
+  save();
+  render();
+  dlgT.close();
+  showView('list');
+  toast(t('tour_loaded', { n: restored.length }));
+});
+
+$('#btnClearBook').addEventListener('click', () => {
+  if (!confirm(t('book_confirm_clear'))) return;
+  state.book = {};
+  save();
+  renderTours();
+});
+
+// Sicherung als Datei (Adressbuch, Touren, Einstellungen, aktuelle Tour)
+$('#btnExport').addEventListener('click', async () => {
+  const data = JSON.stringify({ app: 'delivery', version: 1, exportedAt: new Date().toISOString(), book: state.book, tours: state.tours, settings: state.settings, stops: state.stops });
+  const name = `delivery-sicherung-${today()}.json`;
+  const file = new File([data], name, { type: 'application/json' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+  } catch (err) { if (err.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+});
+$('#btnImport').addEventListener('click', () => $('#importFile').click());
+$('#importFile').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (d.app !== 'delivery' || typeof d.book !== 'object') throw new Error('format');
+    // zusammenführen: Adressbuch (höherer Zähler gewinnt), Touren (nach ID)
+    for (const [k, v] of Object.entries(d.book || {})) if (!state.book[k] || state.book[k].count < v.count) state.book[k] = v;
+    const ids = new Set(state.tours.map((x) => x.id));
+    state.tours = [...state.tours, ...(d.tours || []).filter((x) => !ids.has(x.id))];
+    save();
+    renderTours();
+    toast(t('backup_loaded', { n: Object.keys(d.book || {}).length, t: (d.tours || []).length }));
+  } catch {
+    toast(t('backup_bad'));
+  }
 });
 
 /* ---------------- Einstellungen ---------------- */

@@ -530,3 +530,17 @@ body { background: var(--bg); }
 #map { background: #e9e4dc; }
 @media (prefers-color-scheme: dark) { #map { background: #1b1714; } }
 .candidates .warn { color: var(--orange-text); font-size: 13px; }
+
+/* ---------- Touren & Gedächtnis ---------- */
+.tour-list:empty { display: none; }
+.tour { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+.tour + .tour { border-top: .5px solid var(--line); }
+.tour-text { flex: 1; min-width: 0; display: grid; }
+.tour-text b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tour-text small { color: var(--muted); font-size: 13px; }
+.tour-actions { display: flex; gap: 6px; flex: none; }
+.tour-actions .btn { min-height: 36px; padding: 0 12px; }
+.tour-actions .btn svg { width: 16px; height: 16px; }
+.mem-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; font-size: 15px; }
+.sug.saved .sug-ic { background: var(--gold); color: var(--on-gold); }
+#dlgTours .sheet-foot .btn { font-size: 15px; }

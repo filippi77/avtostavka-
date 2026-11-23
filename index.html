@@ -27,6 +27,9 @@
       <button class="round-btn" id="btnOptimizeTop" data-i18n-aria="optimize" hidden>
         <svg viewBox="0 0 24 24"><path d="M5 19c3-6 11-2 14-14"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/></svg>
       </button>
+      <button class="round-btn" id="btnTours" data-i18n-aria="tours">
+        <svg viewBox="0 0 24 24"><path d="M3 7h18v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z"/><path d="M3 7l2-4h14l2 4M10 11h4"/></svg>
+      </button>
       <button class="round-btn" id="btnSettings" data-i18n-aria="settings">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
       </button>
@@ -258,6 +261,35 @@
         <button type="button" class="btn plain danger" id="btnClearAll" data-i18n="clear_all"></button>
         <button class="btn primary" value="save" id="btnSaveSettings" data-i18n="save">Speichern</button>
       </div>
+    </form>
+  </dialog>
+
+  <!-- Touren & Gedächtnis -->
+  <dialog id="dlgTours" class="sheet">
+    <div class="grabber"></div>
+    <form method="dialog" class="sheet-body">
+      <div class="sheet-head">
+        <h2 data-i18n="tours">Touren</h2>
+        <button class="x-btn" value="cancel" data-i18n-aria="close">✕</button>
+      </div>
+      <div class="form-group">
+        <label class="field"><span data-i18n="tour_name">Name der Tour</span>
+          <input id="tourName" type="text" autocapitalize="sentences">
+        </label>
+      </div>
+      <button type="button" class="btn primary" id="btnSaveTour" data-i18n="tour_save">Aktuelle Tour speichern</button>
+      <div class="section-label" data-i18n="tours_saved">Gespeicherte Touren</div>
+      <ul class="group tour-list" id="tourList"></ul>
+      <div class="section-label" data-i18n="memory">Gedächtnis &amp; Sicherung</div>
+      <div class="form-group">
+        <div class="mem-row"><span id="bookInfo"></span><button type="button" class="btn plain small danger" id="btnClearBook" data-i18n="book_clear">Leeren</button></div>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn" id="btnExport" data-i18n="backup_export">Sicherung exportieren</button>
+        <button type="button" class="btn" id="btnImport" data-i18n="backup_import">Sicherung laden</button>
+      </div>
+      <p class="hint" data-i18n="backup_hint"></p>
+      <input type="file" accept="application/json,.json" id="importFile" hidden>
     </form>
   </dialog>
 
