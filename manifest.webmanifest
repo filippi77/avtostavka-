@@ -1,6 +1,6 @@
 {
-  "name": "Avtostavka – Paketzustellung",
-  "short_name": "Avtostavka",
+  "name": "Delivery – Paketzustellung",
+  "short_name": "Delivery",
   "description": "Versandetiketten scannen, Adressen auf der Karte, optimale Route",
   "lang": "de",
   "start_url": "./",

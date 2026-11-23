@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Avtostavka</string>
-    <string name="title_activity_main">Avtostavka</string>
+    <string name="app_name">Delivery</string>
+    <string name="title_activity_main">Delivery</string>
     <string name="package_name">de.avtostavka.app</string>
     <string name="custom_url_scheme">de.avtostavka.app</string>
 </resources>

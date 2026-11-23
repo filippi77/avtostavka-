@@ -42,21 +42,21 @@ jobs:
           ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: APK umbenennen
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "avtostavka-${{ github.run_number }}.apk"
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "delivery-${{ github.run_number }}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: avtostavka-apk-${{ github.run_number }}
-          path: avtostavka-*.apk
+          name: delivery-apk-${{ github.run_number }}
+          path: delivery-*.apk
 
       - name: Release mit APK veröffentlichen
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-${{ github.run_number }}
-          name: Avtostavka Android ${{ github.run_number }}
+          name: Delivery Android ${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: avtostavka-*.apk
+          files: delivery-*.apk
           body: |
             APK zur Direktinstallation auf Android 7+.
             Установка: скачать файл .apk на телефон → открыть → разрешить установку из этого источника.

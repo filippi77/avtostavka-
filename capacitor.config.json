@@ -1,6 +1,6 @@
 {
   "appId": "de.avtostavka.app",
-  "appName": "Avtostavka",
+  "appName": "Delivery",
   "webDir": "www",
   "android": {
     "allowMixedContent": false
