@@ -544,3 +544,8 @@ body { background: var(--bg); }
 .mem-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; font-size: 15px; }
 .sug.saved .sug-ic { background: var(--gold); color: var(--on-gold); }
 #dlgTours .sheet-foot .btn { font-size: 15px; }
+
+/* ---------- Navi-Auswahl ---------- */
+.nav-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.nav-app { min-height: 56px; font-size: 16px; }
+#setNav + .hint { margin-top: 4px; }

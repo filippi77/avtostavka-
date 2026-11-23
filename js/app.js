@@ -3,6 +3,7 @@ import { geocode, reverse } from './geocode.js';
 import { suggest } from './autocomplete.js';
 import { normKey, remember, updatePosition, lookup, searchBook, frequent, pruneBook, autosaveTour, saveNamedTour, restoreStops, today } from './memory.js';
 import { buildRoute, haversine } from './route.js';
+import { NAV_APPS, navLink, appsFor, platformOf, defaultApp, isAppScheme } from './navigate.js';
 import { recognize, warmUp } from './ocr.js';
 import { t, setLang, getLang, applyI18n, fmtDist, fmtTime } from './i18n.js';
 
@@ -10,6 +11,8 @@ const $ = (s) => document.querySelector(s);
 const KEY = 'avtostavka.v1';
 
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const PLATFORM = platformOf(navigator.userAgent, navigator.maxTouchPoints, navigator.platform);
+const NAV_CHOICES = [...appsFor(PLATFORM), 'ask'];
 const IS_STANDALONE = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 
 // Android-App (Capacitor): nativer Live-Scanner mit Google ML Kit
@@ -32,7 +35,7 @@ const defaults = {
     country: 'de',
     start: 'gps',
     roundtrip: false,
-    nav: IS_IOS ? 'apple' : 'google',
+    nav: defaultApp(PLATFORM),
     autoAdd: false,
     saverFirst: true,
     radius: 50,
@@ -45,7 +48,7 @@ function load() {
   try { s = JSON.parse(localStorage.getItem(KEY)); } catch {}
   if (!s || !Array.isArray(s.stops)) return structuredClone(defaults);
   s = { ...defaults, ...s, settings: { ...defaults.settings, ...s.settings } };
-  if (!['apple', 'google', 'waze'].includes(s.settings.nav)) s.settings.nav = defaults.settings.nav;
+  if (!NAV_CHOICES.includes(s.settings.nav)) s.settings.nav = defaults.settings.nav;
   if (!['de', 'ru'].includes(s.settings.lang)) s.settings.lang = 'de';
   for (const st of s.stops) if (st.express && !st.service) st.service = 'express';
   // Adressen aus älteren Versionen ins Adressbuch übernehmen
@@ -413,7 +416,7 @@ $('#btnGallery').addEventListener('click', () => $('#fileGallery').click());
 $('#fileCamera').addEventListener('change', onPhoto);
 $('#fileGallery').addEventListener('change', onPhoto);
 // Tippen auf den abgedunkelten Hintergrund schließt das Sheet
-for (const d of [dlg, $('#dlgSettings'), $('#dlgTours')]) {
+for (const d of [dlg, $('#dlgSettings'), $('#dlgTours'), $('#dlgNav')]) {
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 }
 
@@ -953,12 +956,11 @@ $('#btnOptimizeTop').addEventListener('click', optimize);
 
 /* ---------------- Navigation ---------------- */
 
-const NAV_NAMES = { apple: 'Apple Karten', google: 'Google Maps', waze: 'Waze' };
-
 /**
- * Ziel für die Navigations-App:
+ * Genauigkeit des Ziels:
  * genaues Haus oder von Hand gesetzter Punkt → Koordinaten;
- * sonst (nur Straße gefunden, alte Einträge) → Adresse als Text, die Navi-App sucht das Haus selbst.
+ * sonst (nur Straße gefunden, alte Einträge) → Adresse als Text, die Navi-App sucht das Haus selbst
+ * (bei Apps, die nur Koordinaten verstehen, gibt es einen Hinweis).
  */
 function useCoords(s) {
   return s.precision === 'house' || s.precision === 'manual';
@@ -968,42 +970,46 @@ function navAddress(s) {
   if (!/(^|\D)\d{4,5}\s+\p{L}/u.test(a) && state.settings.city && !a.toLowerCase().includes(state.settings.city.toLowerCase())) a += ', ' + state.settings.city;
   return a;
 }
-const navDest = (s) => (useCoords(s) ? `${s.lat},${s.lon}` : navAddress(s));
+const navName = (app) => (app === 'geo' ? t('nav_geo') : app === 'ask' ? t('nav_ask') : NAV_APPS[app]?.name || app);
 
-function navUrl(points) {
-  const nav = state.settings.nav;
-  const first = points[0];
-  if (nav === 'apple') {
-    const p = new URLSearchParams({ daddr: navDest(first), dirflg: 'd' });
-    if (!useCoords(first)) p.set('sll', `${first.lat},${first.lon}`); // Suchhinweis: in dieser Gegend
-    return 'https://maps.apple.com/?' + p;
-  }
-  if (nav === 'waze') {
-    return useCoords(first)
-      ? `https://waze.com/ul?ll=${first.lat},${first.lon}&navigate=yes`
-      : `https://waze.com/ul?q=${encodeURIComponent(navAddress(first))}&navigate=yes`;
-  }
-  const last = points[points.length - 1];
-  const p = new URLSearchParams({ api: '1', destination: navDest(last), travelmode: 'driving' });
-  const way = points.slice(0, -1).slice(0, 9);
-  if (way.length) p.set('waypoints', way.map(navDest).join('|'));
-  return 'https://www.google.com/maps/dir/?' + p;
+function openNavWith(app, points) {
+  const { url, count, coordsOnly } = navLink(app, points, { exact: useCoords, address: navAddress });
+  if (points.length > count) toast(t('single_dest', { app: navName(app) }), 3500);
+  else if (coordsOnly && !useCoords(points[0])) toast(t('nav_coords_hint'), 4500);
+  window.__lastNav = url; // für automatisierte Tests
+  // App-Schemata (tomtomgo:, geo: …) und die Android-App: direkt aufrufen; Webseiten im neuen Tab
+  if (IS_NATIVE || isAppScheme(url)) window.location.href = url;
+  else window.open(url, '_blank');
 }
 
+let navPending = [];
 function openNav(points) {
   if (!points.length) return toast(t('no_stops'));
-  // In der Android-App öffnet Capacitor externe Links in der passenden App (Google Maps, Waze …)
-  if (IS_NATIVE) window.location.href = navUrl(points);
-  else window.open(navUrl(points), '_blank');
+  if (state.settings.nav !== 'ask') return openNavWith(state.settings.nav, points);
+  // "Jedes Mal fragen": Auswahl anzeigen
+  navPending = points;
+  $('#navGrid').innerHTML = appsFor(PLATFORM)
+    .map((a) => `<button type="button" class="btn nav-app" data-app="${a}">${esc(navName(a))}</button>`)
+    .join('');
+  $('#navRemember').checked = false;
+  $('#dlgNav').showModal();
 }
+$('#navGrid').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-app]');
+  if (!b) return;
+  if ($('#navRemember').checked) { state.settings.nav = b.dataset.app; save(); }
+  $('#dlgNav').close();
+  openNavWith(b.dataset.app, navPending);
+});
 
 $('#btnOpenNav').addEventListener('click', () => {
-  const pending = state.stops.filter((s) => isOpen(s) && hasPos(s));
-  if (!pending.length) return toast(t('no_stops'));
-  if (state.settings.nav === 'google') return openNav(pending.slice(0, 10));
-  if (pending.length > 1) toast(t('single_dest', { app: NAV_NAMES[state.settings.nav] }), 3500);
-  openNav([pending[0]]);
+  openNav(state.stops.filter((s) => isOpen(s) && hasPos(s)));
 });
+
+/* ---------------- Einstellungen: Navi-Auswahl je nach Gerät ---------------- */
+function fillNavSelect() {
+  $('#setNav').innerHTML = NAV_CHOICES.map((a) => `<option value="${a}">${esc(navName(a))}</option>`).join('');
+}
 
 /* ---------------- Touren & Gedächtnis ---------------- */
 
@@ -1141,6 +1147,7 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setCountry').value = s.country;
   $('#setStart').value = s.start;
   $('#setRoundtrip').checked = s.roundtrip;
+  fillNavSelect();
   $('#setNav').value = s.nav;
   $('#setAutoAdd').checked = s.autoAdd;
   $('#setSaverFirst').checked = s.saverFirst;
