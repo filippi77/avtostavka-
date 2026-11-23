@@ -1,5 +1,6 @@
 import { extractAddress } from './address.js';
 import { geocode, reverse } from './geocode.js';
+import { suggest } from './autocomplete.js';
 import { buildRoute } from './route.js';
 import { recognize, warmUp } from './ocr.js';
 import { t, setLang, getLang, applyI18n, fmtDist, fmtTime } from './i18n.js';
@@ -31,6 +32,7 @@ const defaults = {
     nav: IS_IOS ? 'apple' : 'google',
     autoAdd: false,
     saverFirst: true,
+    radius: 50,
   },
 };
 
@@ -84,6 +86,7 @@ const ICON = {
   del: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+  road: '<svg viewBox="0 0 24 24"><path d="M5 21 9 3M19 21 15 3M12 4v2M12 10v3M12 17v3"/></svg>',
   bolt: '<svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
 };
 
@@ -325,6 +328,9 @@ let candidates = [];
 function resetForm() {
   candidates = [];
   $('#addrInput').value = editing?.address || '';
+  pickedStreet = null;
+  pickedAddress = '';
+  hideSuggest();
   $('#nameInput').value = editing?.name || '';
   $('#phoneInput').value = editing?.phone || '';
   $('#noteInput').value = editing?.note || '';
@@ -351,22 +357,25 @@ function setAddEnabled(on) {
   $('#btnAddNext').disabled = !on;
 }
 
-function openAdd({ edit = null, scan = false } = {}) {
+function openAdd({ edit = null, scan = false, manual = false } = {}) {
   editing = edit;
   $('#addTitle').textContent = t(edit ? 'edit_stop' : 'new_parcel');
-  $('#scanSrc').hidden = !!edit;
+  $('#scanSrc').hidden = !!edit || manual;
   $('#btnAddNext').hidden = !!edit;
   $('#btnAdd').textContent = t(edit ? 'save' : 'add');
   resetForm();
   if (!dlg.open) dlg.showModal();
   if (!edit && !NativeScanner) warmUp(state.settings.ocr);
+  if (!myPos) locate(); // für die Umkreissuche
   if (scan) startCamera();
 }
 
 $('#tabScan').addEventListener('click', () => openAdd({ scan: true }));
 $('#btnScanEmpty').addEventListener('click', () => openAdd({ scan: true }));
-$('#btnManualEmpty').addEventListener('click', () => { openAdd(); $('#addrInput').focus(); });
-$('#btnManual').addEventListener('click', () => { openAdd(); $('#addrInput').focus(); });
+$('#btnManualEmpty').addEventListener('click', () => { openAdd({ manual: true }); $('#addrInput').focus(); });
+$('#btnManual').addEventListener('click', () => { openAdd({ manual: true }); $('#addrInput').focus(); });
+// Adressfeld beim Tippen nach oben holen, damit die Vorschläge über der Tastatur sichtbar sind
+$('#addrInput').addEventListener('focus', () => setTimeout(() => $('#addrInput').closest('.form-group').scrollIntoView({ block: 'start', behavior: 'smooth' }), 250));
 $('#btnCamera').addEventListener('click', () => startCamera());
 
 /** Live-Scanner (Android-App) bzw. Foto aufnehmen (Browser). */
@@ -464,6 +473,104 @@ function nearPoint() {
   return myPos;
 }
 
+/** Mittelpunkt für die Umkreissuche: aktueller GPS-Standort, sonst letzter bekannter, sonst Mitte der Stopps. */
+function searchCenter() {
+  return myPos || state.lastPos || nearPoint();
+}
+
+/* ---- Vorschläge beim Tippen (Umkreis) ---- */
+let sugTimer = null;
+let sugAbort = null;
+let sugItems = [];
+let pickedStreet = null;
+let pickedAddress = '';
+
+function hideSuggest() {
+  sugItems = [];
+  $('#suggest').hidden = true;
+  $('#suggest').innerHTML = '';
+}
+
+async function runSuggest() {
+  const q = $('#addrInput').value.trim();
+  if (q.length < 3 || q === pickedAddress) return hideSuggest();
+  sugAbort?.abort();
+  sugAbort = new AbortController();
+  let query = q;
+  // Nach Auswahl einer Straße: Ort mitschicken, damit die Hausnummer eindeutig wird
+  if (pickedStreet && q.toLowerCase().startsWith(pickedStreet.street.toLowerCase()) && !q.includes(',')) {
+    query = `${q}, ${[pickedStreet.postcode, pickedStreet.city].filter(Boolean).join(' ')}`;
+  }
+  const radiusKm = +state.settings.radius || 50;
+  // Ohne bekannten Standort kurz auf GPS warten, damit der Umkreis greift
+  if (!searchCenter()) await Promise.race([locate(), new Promise((r) => setTimeout(r, 3000))]);
+  try {
+    sugItems = await suggest(query, { center: searchCenter(), radiusKm, lang: getLang(), signal: sugAbort.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    sugItems = [];
+  }
+  if ($('#addrInput').value.trim() !== q) return; // inzwischen weitergetippt
+  const ul = $('#suggest');
+  if (!sugItems.length) {
+    ul.innerHTML = `<li class="sug-empty">${esc(t('no_suggest', { r: radiusKm }))}</li>`;
+  } else {
+    ul.innerHTML = sugItems.map((x, i) => `
+      <li><button type="button" class="sug" data-i="${i}">
+        <span class="sug-ic">${x.kind === 'street' ? ICON.road : ICON.pin}</span>
+        <span class="sug-text"><b>${esc(x.main)}</b><small>${esc(x.sub)}</small></span>
+        ${x.dist != null ? `<span class="sug-dist">${fmtDist(x.dist)}</span>` : ''}
+      </button></li>`).join('');
+  }
+  ul.hidden = false;
+}
+
+function pickSuggestion(i) {
+  const x = sugItems[i];
+  if (!x) return;
+  const input = $('#addrInput');
+  hideSuggest();
+  if (x.kind === 'street') {
+    // Straße gewählt → Hausnummer eintippen
+    pickedStreet = x;
+    pickedAddress = '';
+    input.value = x.main + ' ';
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    setGeoStatus(t('enter_number'));
+    return;
+  }
+  // Haus / Ort gewählt → Koordinaten sind bekannt, direkt hinzufügbar
+  pickedStreet = null;
+  pickedAddress = x.address;
+  input.value = x.address;
+  input.blur();
+  candidates = [{ lat: x.lat, lon: x.lon, label: x.address + (x.sub && !x.address.includes(x.sub) ? ' · ' + x.sub : '') }];
+  $('#candidates').innerHTML = `<li><label><input type="radio" name="cand" value="0" checked><span>${esc(x.address)}${x.dist != null ? ` · ${fmtDist(x.dist)}` : ''}</span></label></li>`;
+  setGeoStatus(t('found_one'));
+  setAddEnabled(true);
+}
+
+$('#addrInput').addEventListener('input', () => {
+  const v = $('#addrInput').value.trim();
+  // Text nach einer Auswahl geändert → alte Koordinaten verwerfen
+  if (pickedAddress && v !== pickedAddress) {
+    pickedAddress = '';
+    candidates = [];
+    $('#candidates').innerHTML = '';
+    setGeoStatus('');
+    setAddEnabled(!!editing);
+  }
+  clearTimeout(sugTimer);
+  sugTimer = setTimeout(runSuggest, 220);
+});
+$('#addrInput').addEventListener('blur', () => setTimeout(hideSuggest, 200));
+$('#suggest').addEventListener('pointerdown', (e) => e.preventDefault()); // Fokus behalten
+$('#suggest').addEventListener('click', (e) => {
+  const b = e.target.closest('.sug');
+  if (b) pickSuggestion(+b.dataset.i);
+});
+
 async function findCandidates({ auto = false } = {}) {
   const addr = $('#addrInput').value.trim();
   if (!addr) return setGeoStatus(t('enter_address'), true);
@@ -474,7 +581,8 @@ async function findCandidates({ auto = false } = {}) {
     candidates = await geocode(addr, {
       country: state.settings.country.trim().toLowerCase(),
       city: state.settings.city,
-      near: nearPoint(),
+      near: searchCenter(),
+      radiusKm: +state.settings.radius || 50,
       lang: getLang(),
     });
   } catch (err) {
@@ -492,7 +600,11 @@ async function findCandidates({ auto = false } = {}) {
 
 $('#btnFind').addEventListener('click', () => findCandidates());
 $('#addrInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); findCandidates(); }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (sugItems.length && !$('#suggest').hidden) pickSuggestion(0);
+    else { hideSuggest(); findCandidates(); }
+  }
 });
 
 function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {}) {
@@ -656,6 +768,8 @@ function locate(center = false) {
     navigator.geolocation.getCurrentPosition(
       (p) => {
         myPos = { lat: p.coords.latitude, lon: p.coords.longitude };
+        state.lastPos = myPos;
+        save();
         if (map) {
           if (!meMarker) {
             meMarker = L.marker([myPos.lat, myPos.lon], {
@@ -798,6 +912,7 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setNav').value = s.nav;
   $('#setAutoAdd').checked = s.autoAdd;
   $('#setSaverFirst').checked = s.saverFirst;
+  $('#setRadius').value = String(s.radius || 50);
   dlgS.showModal();
 });
 $('#btnSaveSettings').addEventListener('click', () => {
@@ -811,6 +926,7 @@ $('#btnSaveSettings').addEventListener('click', () => {
     nav: $('#setNav').value,
     autoAdd: $('#setAutoAdd').checked,
     saverFirst: $('#setSaverFirst').checked,
+    radius: +$('#setRadius').value || 50,
   });
   save();
   setLang(state.settings.lang);

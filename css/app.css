@@ -509,3 +509,16 @@ body { background: var(--bg); }
 .pin.next.svc-plus, .pin.next.svc-express { background: var(--express); }
 .pin.next.svc-saver { background: var(--saver); }
 .pin.next.svc-plus span, .pin.next.svc-express span, .pin.next.svc-saver span { color: #fff; }
+
+/* ---------- Adress-Vorschläge ---------- */
+.suggest { list-style: none; margin: 0 -14px; padding: 0; border-top: .5px solid var(--line); }
+.suggest li + li { border-top: .5px solid var(--line); }
+.sug { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: none; border: 0; text-align: left; cursor: pointer; }
+.sug:active { background: var(--surface-2); }
+.sug-ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--blue-soft); color: var(--blue); flex: none; }
+.sug-ic svg { width: 18px; height: 18px; }
+.sug-text { flex: 1; min-width: 0; display: grid; }
+.sug-text b { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sug-text small { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sug-dist { font-size: 13px; color: var(--muted); flex: none; }
+.sug-empty { padding: 10px 14px; font-size: 14px; color: var(--muted); }

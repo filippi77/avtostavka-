@@ -152,6 +152,7 @@
           <span data-i18n="f_address">Lieferadresse</span>
           <textarea id="addrInput" rows="2" data-i18n-ph="f_address_ph" autocapitalize="words"></textarea>
         </label>
+        <ul class="suggest" id="suggest" hidden></ul>
         <label class="field">
           <span data-i18n="f_name">Empfänger</span>
           <input id="nameInput" type="text" data-i18n-ph="f_name_ph" autocapitalize="words">
@@ -222,6 +223,14 @@
       <div class="form-group">
         <label class="field"><span data-i18n="s_city"></span>
           <input id="setCity" type="text" data-i18n-ph="s_city_ph" autocapitalize="words">
+        </label>
+        <label class="field"><span data-i18n="s_radius"></span>
+          <select id="setRadius">
+            <option value="10">10 km</option>
+            <option value="25">25 km</option>
+            <option value="50">50 km</option>
+            <option value="100">100 km</option>
+          </select>
         </label>
         <label class="field"><span data-i18n="s_country"></span>
           <input id="setCountry" type="text" maxlength="20" placeholder="de">

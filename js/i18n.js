@@ -119,6 +119,9 @@ const dict = {
     s_saver: 'Express Saver vor Standard anfahren',
     express_on: '⚡ Express – kommt an den Anfang der Tour',
     express_off: 'Express entfernt',
+    enter_number: 'Hausnummer eingeben…',
+    no_suggest: 'Keine Treffer im Umkreis von {r} km – „Adresse suchen“ tippen',
+    s_radius: 'Suchradius für Adressen',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -239,6 +242,9 @@ const dict = {
     s_saver: 'Express Saver раньше Standard',
     express_on: '⚡ Экспресс — в начало маршрута',
     express_off: 'Экспресс снят',
+    enter_number: 'Введите номер дома…',
+    no_suggest: 'Ничего в радиусе {r} км — нажмите «Найти адрес»',
+    s_radius: 'Радиус поиска адресов',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

@@ -12,14 +12,14 @@ async function throttle() {
   last = Date.now();
 }
 
-async function search(q, { country, near, lang }) {
-  const key = JSON.stringify([q, country, lang, near && [near.lat.toFixed(1), near.lon.toFixed(1)]]);
+async function search(q, { country, near, lang, radiusKm = 60 }) {
+  const key = JSON.stringify([q, country, lang, radiusKm, near && [near.lat.toFixed(1), near.lon.toFixed(1)]]);
   if (cache.has(key)) return cache.get(key);
   await throttle();
   const p = new URLSearchParams({ q, format: 'jsonv2', limit: '5', 'accept-language': lang });
   if (country) p.set('countrycodes', country);
   if (near) {
-    const d = 0.6;
+    const d = radiusKm / 111;
     p.set('viewbox', [near.lon - d, near.lat + d, near.lon + d, near.lat - d].join(','));
   }
   const r = await fetch(`${NOMINATIM}/search?${p}`);
@@ -35,9 +35,9 @@ async function search(q, { country, near, lang }) {
 }
 
 /** Sucht Koordinaten einer Adresse; bis zu 5 Treffer. */
-export async function geocode(address, { country = '', city = '', near = null, lang = 'de' } = {}) {
+export async function geocode(address, { country = '', city = '', near = null, lang = 'de', radiusKm = 60 } = {}) {
   for (const q of geocodeQueries(address, city)) {
-    const res = await search(q, { country, near, lang });
+    const res = await search(q, { country, near, lang, radiusKm });
     if (res.length) return res.map((r) => ({ ...r, query: q }));
   }
   return [];
