@@ -56,6 +56,15 @@ npm run android:sync
 cd android && ./gradlew assembleDebug
 ```
 
+## Сканер Zebra (TC56 и др.)
+
+В Android-версии (APK) поддерживаются терминалы Zebra со встроенным сканером через **DataWedge**. При запуске Delivery сам создаёт профиль DataWedge «Delivery» (MaxiCode, Code128, DataMatrix, QR, PDF417 → Broadcast-Intent `de.avtostavka.app.SCAN`, ввод с клавиатуры выключен).
+
+- **MaxiCode** (2D-код UPS): берутся индекс, уровень сервиса, трек-номер 1Z и — если они записаны открытым текстом — улица и город. Если адреса в коде нет, приложение просит сфотографировать этикетку или ввести адрес.
+- **Штрихкод 1Z**: если посылка уже в туре, она сразу показывается; иначе открывается форма с трек-номером.
+- Нужен **Android 7.0+** (TC56 поставлялся с Android 6 — обновить через Zebra до 7.1/8.1) и актуальный «Android System WebView».
+- Если на старом DataWedge профиль не создался сам: приложение DataWedge → новый профиль «Delivery» → связать с `de.avtostavka.app` → Intent output: включить, Action `de.avtostavka.app.SCAN`, Delivery «Broadcast intent»; Keystroke output: выключить; в Decoders включить MaxiCode.
+
 ## iPhone / iOS
 
 Работает на iPhone с **iOS 15.4 и новее** (Safari). Проверено и учтено:
@@ -105,6 +114,8 @@ npm test       # тесты разбора адресов и оптимизац�
 | `js/ocr.js` | подготовка фото и распознавание текста |
 | `js/address.js` | извлечение адреса, имени и телефона (DE + RU), нормализация для геокодера |
 | `js/geocode.js` | поиск координат (Nominatim) |
+| `js/barcode.js` | разбор кодов со сканера (MaxiCode UPS, 1Z) |
+| `android/…/ZebraScannerPlugin.java` | сканер Zebra через DataWedge |
 | `js/visits.js` | распознавание пребывания на адресах, CSV-выгрузка |
 | `js/navigate.js` | ссылки для передачи адреса в навигаторы |
 | `js/memory.js` | адресная книга и сохранённые туры |

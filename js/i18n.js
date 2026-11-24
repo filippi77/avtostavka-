@@ -171,6 +171,10 @@ const dict = {
     nav_first_n: '{app} übernimmt max. {n} Stopps – die nächsten {n} wurden übergeben',
     help: 'Anleitung',
     help_full: 'Anleitung mit Bildern',
+    scan_hw_hint: 'Oder einfach die Scan-Taste am Gerät drücken (MaxiCode / 1Z)',
+    scan_in_tour: 'Schon in der Tour: {a}',
+    scan_unknown: 'Unbekannter Code – bitte MaxiCode oder 1Z-Strichcode scannen',
+    scan_no_addr: 'Sendungsnummer {t} · PLZ {plz} übernommen. Adresse steht nicht im Code – Etikett fotografieren oder Adresse eintippen.',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -343,6 +347,10 @@ const dict = {
     nav_first_n: '{app} принимает до {n} точек — переданы следующие {n}',
     help: 'Инструкция (нем.)',
     help_full: 'Инструкция с картинками (нем.)',
+    scan_hw_hint: 'Или просто нажмите кнопку сканера на устройстве (MaxiCode / 1Z)',
+    scan_in_tour: 'Уже в туре: {a}',
+    scan_unknown: 'Неизвестный код — сканируйте MaxiCode или штрихкод 1Z',
+    scan_no_addr: 'Трек-номер {t} · индекс {plz} взяты. Адреса в коде нет — сфотографируйте этикетку или введите адрес.',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

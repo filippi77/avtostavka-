@@ -1,4 +1,5 @@
-import { extractAddress } from './address.js';
+import { extractAddress, smartCase } from './address.js';
+import { parseScan, scanAddress } from './barcode.js';
 import { geocode, reverse } from './geocode.js';
 import { suggest } from './autocomplete.js';
 import { normKey, remember, updatePosition, lookup, searchBook, frequent, pruneBook, autosaveTour, saveNamedTour, restoreStops, today } from './memory.js';
@@ -21,6 +22,11 @@ const IS_NATIVE = !!window.Capacitor?.isNativePlatform?.();
 const NativeScanner = (() => {
   if (!IS_NATIVE) return null;
   try { return window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin('LabelScanner') : window.Capacitor.Plugins?.LabelScanner; } catch { return null; }
+})();
+// Hardware-Scanner (Zebra DataWedge) in der Android-App
+const Zebra = (() => {
+  if (!IS_NATIVE) return null;
+  try { return window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin('ZebraScanner') : window.Capacitor.Plugins?.ZebraScanner; } catch { return null; }
 })();
 
 const defaults = {
@@ -484,6 +490,52 @@ async function processText(text) {
   scanTracking = r.tracking || '';
   if (r.confidence === 'low') $('#rawBox').open = true;
   await findCandidates({ auto: state.settings.autoAdd && r.confidence !== 'low' });
+}
+
+/* ---- Hardware-Scanner (Zebra) ---- */
+let hwScanner = false;
+
+async function initHardwareScanner() {
+  if (!Zebra) return;
+  try {
+    const r = await Zebra.isAvailable();
+    hwScanner = !!r?.available;
+  } catch { hwScanner = false; }
+  if (!hwScanner) return;
+  document.body.classList.add('hw-scanner');
+  $('#photoEmpty small').dataset.i18n = 'scan_hw_hint';
+  setLang(state.settings.lang);
+  Zebra.addListener('scan', (e) => onHardwareScan(e?.data, e?.type));
+}
+
+/** Gescannter Code: Paket schon in der Tour → anzeigen; sonst neues Paket mit den Daten aus dem Code */
+async function onHardwareScan(data, type) {
+  const r = parseScan(data, type);
+  if (r.kind === 'other') return toast(t('scan_unknown'));
+  try { navigator.vibrate?.(40); } catch {}
+  const known = r.tracking && state.stops.find((x) => x.tracking === r.tracking);
+  if (known && !(dlg.open && editing === known)) {
+    if (dlg.open) dlg.close();
+    showView('list');
+    openId = isOpen(known) ? known.id : null;
+    render();
+    document.querySelector(`[data-id="${known.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return toast('📦 ' + t('scan_in_tour', { a: splitAddr(known.address).street }));
+  }
+  if (!dlg.open) openAdd({ manual: true });
+  else if (!editing) resetForm();
+  if (r.tracking) scanTracking = r.tracking;
+  if (r.service !== null) setService(r.service);
+  $('#rawText').textContent = r.raw.replace(/\x1d/g, '⟨GS⟩').replace(/\x1e/g, '⟨RS⟩').replace(/\x04/g, '⟨EOT⟩');
+  $('#rawBox').hidden = false;
+  const addr = scanAddress(r);
+  if (addr) {
+    $('#addrInput').value = smartCase(addr);
+    await findCandidates({ auto: state.settings.autoAdd });
+  } else {
+    setGeoStatus(t('scan_no_addr', { t: r.tracking ? '…' + r.tracking.slice(-4) : '–', plz: r.postcode || '–' }));
+    $('#addrInput').focus();
+  }
 }
 
 function setGeoStatus(msg, err = false) {
@@ -1348,8 +1400,9 @@ if (NativeScanner) {
 setLang(state.settings.lang);
 render();
 startTracking();
+initHardwareScanner();
 if (!IS_NATIVE && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 // für automatisierte Tests
-window.__app = { state: () => state, render, optimize };
+window.__app = { state: () => state, render, optimize, onHardwareScan };

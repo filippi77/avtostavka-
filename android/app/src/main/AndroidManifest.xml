@@ -44,6 +44,11 @@
         </provider>
     </application>
 
+    <!-- Zebra DataWedge sichtbar machen (Paket-Sichtbarkeit ab Android 11) -->
+    <queries>
+        <package android:name="com.symbol.datawedge" />
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />

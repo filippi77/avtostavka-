@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(LabelScannerPlugin.class);
+        registerPlugin(ZebraScannerPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
