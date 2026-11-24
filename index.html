@@ -54,6 +54,15 @@
         <button class="btn small" id="btnNewTour"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/></svg><span data-i18n="new_tour">Neue Tour</span></button>
       </div>
 
+      <div class="search-bar" id="searchBar" hidden>
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" id="stopSearch" data-i18n-ph="search_ph" autocomplete="off" enterkeyhint="search">
+      </div>
+      <div id="searchWrap" hidden>
+        <div class="section-label"><span data-i18n="search_results">Treffer</span> <span class="count" id="searchCount"></span></div>
+        <ol class="group" id="searchList"></ol>
+      </div>
+
       <div class="empty" id="emptyList">
         <div class="empty-icon">
           <svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>
@@ -282,8 +291,16 @@
           <select id="setStart">
             <option value="gps" data-i18n="s_start_gps"></option>
             <option value="first" data-i18n="s_start_first"></option>
+            <option value="depot" data-i18n="s_start_depot"></option>
           </select>
         </label>
+        <div class="depot-row" id="rowDepot" hidden>
+          <label class="field"><span data-i18n="s_depot">Adresse des Startpunkts</span>
+            <input id="setDepot" type="text" autocapitalize="words" data-i18n-ph="s_depot_ph">
+          </label>
+          <button type="button" class="btn small" id="btnDepotHere" data-i18n="s_depot_here">Aktueller Standort</button>
+          <small class="hint" id="depotStatus"></small>
+        </div>
         <label class="field"><span data-i18n="s_nav"></span>
           <select id="setNav"></select>
           <small class="hint" data-i18n="s_nav_hint"></small>

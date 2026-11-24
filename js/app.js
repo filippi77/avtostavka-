@@ -84,6 +84,7 @@ function load() {
   return s;
 }
 function save() {
+  ensureNumbers();
   // Tour des Tages automatisch mitschreiben
   state.tours = autosaveTour(state.tours || [], state.stops, { date: state.tourDate || today() });
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
@@ -166,6 +167,17 @@ function render() {
   $('#emptyList').hidden = total > 0;
   $('#btnManual').hidden = total === 0;
   $('#installHint').hidden = !(IS_IOS && !IS_STANDALONE && !state.hideInstallHint);
+  // Suche nach Paketnummer, Straße, Name, Sendungsnummer
+  $('#searchBar').hidden = total < 2;
+  const q = total < 2 ? '' : $('#stopSearch').value.trim().toLowerCase().replace(/^#/, '');
+  document.body.classList.toggle('searching', !!q);
+  $('#searchWrap').hidden = !q;
+  if (q) {
+    const hits = state.stops.filter((s) => String(s.no) === q || (q.length >= 2 && [s.address, s.name, s.tracking, s.note].some((v) => String(v || '').toLowerCase().includes(q))));
+    hits.sort((a, b) => (String(b.no) === q) - (String(a.no) === q));
+    $('#searchCount').textContent = hits.length;
+    $('#searchList').innerHTML = hits.length ? hits.map((s) => rowHtml(s, isOpen(s) ? pending.indexOf(s) + 1 : '', { first: true, last: true })).join('') : `<li class="sug-empty">${esc(t('search_none'))}</li>`;
+  }
   // Datum der Tour; alte Tour mit offenen Stopps deutlich markieren
   const old = state.tourDate < today() && pending.length > 0;
   $('#tourDateLabel').textContent = t('tour_of', { d: fmtTourDate(state.tourDate) });
@@ -230,6 +242,7 @@ function nextCardHtml(s) {
       <span class="svc-box svc-${svc || 'std'}">${SVC_CODE[svc]}</span>
     </div>
     <div class="label-body" data-id="${s.id}">
+      ${s.no ? `<div class="pkg-no">#${s.no}</div>` : ''}
       <div class="label-tag">SHIP TO</div>
       ${s.name ? `<div class="who">${esc(s.name)}</div>` : ''}
       <div class="street">${esc(street)}</div>
@@ -286,7 +299,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
       <button class="row-main" data-act="toggle">
         <span class="badge">${badge}</span>
         <span class="row-text">
-          <span class="row-street" style="display:block">${isExpress(s) && isOpen(s) ? `<span class="svc-mini svc-${s.service}">${SVC_CODE[s.service]}</span>` : ''}${esc(street)}</span>
+          <span class="row-street" style="display:block">${s.no ? `<span class="no-mini">#${s.no}</span>` : ''}${isExpress(s) && isOpen(s) ? `<span class="svc-mini svc-${s.service}">${SVC_CODE[s.service]}</span>` : ''}${esc(street)}</span>
           <span class="row-sub" style="display:block">${hasPos(s) || s.pending || s.review ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}${s.tracking ? ` <span class="trk-mini">…${esc(s.tracking.slice(-4))}</span>` : ''}</span>
         </span>
         ${leg && isOpen(s) ? `<span class="row-eta">${fmtDist(leg.distance)}<br>${fmtTime(leg.duration)}</span>` : ''}
@@ -296,8 +309,16 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
     </li>`;
 }
 
+/** Paketnummer: fortlaufend je Tour (#1, #2 …), ändert sich nicht beim Umsortieren – zum Wiederfinden im Wagen */
+function ensureNumbers() {
+  let max = Math.max(0, ...state.stops.map((x) => x.no || 0));
+  for (const x of state.stops) if (!x.no) x.no = ++max;
+}
+const noTag = (s) => (s.no ? '#' + s.no : '');
+
 /** Stopp nach Service-Stufe einreihen (Express Plus → Express → Saver → Standard), Erledigte ans Ende. */
 function placeStop(s) {
+  if (!s.no) s.no = Math.max(0, ...state.stops.filter((x) => x !== s).map((x) => x.no || 0)) + 1;
   const i = state.stops.indexOf(s);
   if (i >= 0) state.stops.splice(i, 1);
   if (!isOpen(s)) { state.stops.push(s); return; }
@@ -430,7 +451,7 @@ function setAddEnabled(on) {
 
 function openAdd({ edit = null, scan = false, manual = false } = {}) {
   editing = edit;
-  $('#addTitle').textContent = t(edit ? 'edit_stop' : 'new_parcel');
+  $('#addTitle').textContent = t(edit ? 'edit_stop' : 'new_parcel') + (edit?.no ? ` · #${edit.no}` : '');
   $('#scanSrc').hidden = !!edit || manual;
   $('#btnAddNext').hidden = !!edit;
   $('#btnAdd').textContent = t(edit ? 'save' : 'add');
@@ -826,6 +847,7 @@ $('#btnAddNoCoords').addEventListener('click', () => commitAdd({ withoutCoords: 
 
 let map = null;
 let markers = {};
+let depotMarker = null;
 let routeLine = null;
 let meMarker = null;
 let myPos = null;
@@ -895,7 +917,7 @@ function renderMap() {
     }).addTo(map);
     const { street, city } = splitAddr(s.address);
     m.bindPopup(`
-      <b>${isOpen(s) ? n + '. ' : ''}${esc(street)}</b><br>
+      <b>${isOpen(s) ? n + '. ' : ''}${esc(street)}</b>${s.no ? ` <span class="no-mini">#${s.no}</span>` : ''}<br>
       ${city ? esc(city) + '<br>' : ''}
       ${s.name ? esc(s.name) + '<br>' : ''}
       ${s.phone ? `<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ''}
@@ -919,6 +941,11 @@ function renderMap() {
     });
     markers[s.id] = m;
   });
+  if (depotMarker) { depotMarker.remove(); depotMarker = null; }
+  const d = state.settings.depot;
+  if (state.settings.start === 'depot' && d?.lat != null) {
+    depotMarker = L.marker([d.lat, d.lon], { icon: pinIcon('⌂', 'depot'), zIndexOffset: 400 }).addTo(map).bindPopup(`<b>${esc(t('s_start_depot'))}</b><br>${esc(d.address)}`);
+  }
   if (routeLine) { routeLine.remove(); routeLine = null; }
   if (state.route?.geometry?.length) {
     routeLine = L.layerGroup([
@@ -1121,6 +1148,10 @@ async function optimize() {
     if (state.settings.start === 'gps') {
       start = await locate();
       if (!start) toast(t('gps_unavailable'));
+    } else if (state.settings.start === 'depot') {
+      const d = state.settings.depot;
+      if (d?.lat != null) start = { lat: d.lat, lon: d.lon };
+      else toast(t('depot_missing'));
     }
     const points = start ? [{ ...start, id: '__start' }, ...pending] : pending;
     const priority = points.map((p) => (p.id === '__start' ? 0 : prioOf(p)));
@@ -1540,13 +1571,13 @@ async function quickAdd(r, getSnapshot) {
   if (addr) {
     geoQueue.push(stop.id);
     beep('ok');
-    quickFlash('ok', '✓ ' + splitAddr(stop.address).street);
+    quickFlash('ok', `#${stop.no} ✓ ` + splitAddr(stop.address).street);
   } else {
     const blob = getSnapshot ? await getSnapshot() : null;
     if (blob) {
       ocrQueue.push({ id: stop.id, blob });
       beep('text');
-      quickFlash('text', t('quick_text_queued', { t: stop.address }));
+      quickFlash('text', `#${stop.no} · ` + t('quick_text_queued', { t: stop.address }));
     } else {
       stop.pending = null;
       stop.review = true;
@@ -1613,7 +1644,7 @@ async function quickPhoto() {
   $('#quickCount').textContent = String(quick.count);
   ocrQueue.push({ id: stop.id, blob });
   beep('text');
-  quickFlash('text', t('quick_photo_queued'));
+  quickFlash('text', `#${stop.no} · ` + t('quick_photo_queued'));
   renderSoon();
   pumpQueues();
 }
@@ -1645,7 +1676,7 @@ async function ocrWorker() {
       s.ocrText = String(text || '').trim().slice(0, 600);
       // Ergebnis sofort in der Schnellerfassung zeigen
       if (quick) {
-        if (r.address) quickFlash('ok', '✓ ' + r.address);
+        if (r.address) quickFlash('ok', `#${s.no} ✓ ` + r.address);
         else quickFlash('dup', '⚠ ' + t('quick_ocr_fail'));
       }
       // gleiches Paket schon vorhanden (Sendungsnummer erst jetzt erkannt)?
@@ -1691,12 +1722,12 @@ async function readList(blob) {
   } catch {}
   const have = new Set(state.stops.map((x) => normKey(x.address)));
   let added = 0, dup = 0;
+  const firstNo = Math.max(0, ...state.stops.map((x) => x.no || 0)) + 1;
   for (const a of found) {
     const k = normKey(a.address);
     if (have.has(k)) { dup++; continue; }
     have.add(k);
     const stop = { id: uid(), address: a.address, name: a.name || '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'geo' };
-    state.stops.push(stop); // Reihenfolge der Liste beibehalten
     placeStop(stop);
     geoQueue.push(stop.id);
     added++;
@@ -1706,7 +1737,7 @@ async function readList(blob) {
     quick.count += added;
     $('#quickCount').textContent = String(quick.count);
     if (!found.length) { beep('dup'); quickFlash('dup', '⚠ ' + t('quick_list_none')); }
-    else { beep(added ? 'ok' : 'dup'); quickFlash(added ? 'ok' : 'dup', t('quick_list_result', { n: added, d: dup })); }
+    else { beep(added ? 'ok' : 'dup'); quickFlash(added ? 'ok' : 'dup', t('quick_list_result', { n: added, d: dup }) + (added ? ` (#${firstNo}${added > 1 ? '–#' + (firstNo + added - 1) : ''})` : '')); }
   }
   geoWorker();
 }
@@ -1946,6 +1977,8 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setCity').value = s.city;
   $('#setCountry').value = s.country;
   $('#setStart').value = s.start;
+  $('#setDepot').value = s.depot?.address || '';
+  showDepotRow();
   $('#setRoundtrip').checked = s.roundtrip;
   fillNavSelect();
   $('#setNav').value = s.nav;
@@ -1983,7 +2016,47 @@ function applySettings() {
   showView(currentView);
   render();
 }
-$('#dlgSettings').addEventListener('change', (e) => { if (e.target.closest('input, select')) applySettings(); });
+$('#dlgSettings').addEventListener('change', (e) => { if (e.target.closest('input, select') && e.target.id !== 'setDepot') applySettings(); });
+
+/* ---------- Fester Startpunkt (Depot) ---------- */
+function showDepotRow() {
+  $('#rowDepot').hidden = $('#setStart').value !== 'depot';
+  const d = state.settings.depot;
+  $('#depotStatus').textContent = d?.lat != null ? '✓ ' + t('depot_ok', { a: d.address }) : t('depot_hint');
+}
+$('#setStart').addEventListener('change', showDepotRow);
+async function setDepot(address, pos = null) {
+  $('#depotStatus').textContent = '⏳ ' + t('depot_searching');
+  try {
+    if (!pos) {
+      const c = await geocode(address, { country: state.settings.country.trim().toLowerCase(), city: state.settings.city, near: searchCenter(), radiusKm: Math.max(+state.settings.radius || 50, 100), lang: getLang() });
+      if (!c[0]) { $('#depotStatus').textContent = '⚠ ' + t('depot_notfound'); return; }
+      pos = { lat: c[0].lat, lon: c[0].lon };
+    }
+    state.settings.depot = { address, lat: pos.lat, lon: pos.lon };
+    invalidateRoute();
+    save();
+    showDepotRow();
+    renderMap();
+  } catch {
+    $('#depotStatus').textContent = '⚠ ' + t('depot_notfound');
+  }
+}
+$('#setDepot').addEventListener('change', () => {
+  const a = $('#setDepot').value.trim();
+  if (!a) { state.settings.depot = null; save(); showDepotRow(); renderMap(); return; }
+  setDepot(a);
+});
+$('#btnDepotHere').addEventListener('click', async () => {
+  const p = await locate();
+  if (!p) return toast(t('gps_unavailable'));
+  let a = '';
+  try { a = await reverse(p.lat, p.lon, getLang()); } catch {}
+  a = (a || `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`).split(',').slice(0, 3).join(',');
+  $('#setDepot').value = a;
+  setDepot(a, p);
+});
+$('#stopSearch').addEventListener('input', () => render());
 $('#btnSaveSettings').addEventListener('click', () => {
   applySettings();
   toast(t('saved'));
@@ -2006,6 +2079,7 @@ if (NativeScanner) {
   $('#photoEmpty small').dataset.i18n = 'scan_live_hint';
 }
 setLang(state.settings.lang);
+ensureNumbers(); // Paketnummern für Stopps aus älteren Versionen
 // unterbrochene Hintergrundarbeit nach Neustart fortsetzen
 for (const st of state.stops) {
   if (st.pending === 'geo') geoQueue.push(st.id);
