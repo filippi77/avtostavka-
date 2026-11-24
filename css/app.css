@@ -572,6 +572,3 @@ body { background: var(--bg); }
 .help-link { margin-top: 4px; }
 #dlgSettings .help-link { text-decoration: none; }
 
-/* Adresse kopiert */
-.copy-addr { background: var(--surface); border-radius: 14px; padding: 16px; font-size: 22px; font-weight: 800; line-height: 1.25; -webkit-user-select: all; user-select: all; }
-.copy-steps { margin: 0; padding-left: 22px; font-size: 16px; display: grid; gap: 6px; }

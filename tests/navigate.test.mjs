@@ -11,7 +11,7 @@ test('Plattformen', () => {
   assert.equal(platformOf('Mozilla/5.0 (Linux; Android 14; Pixel 8)'), 'android');
   assert.ok(appsFor('ios').includes('apple') && !appsFor('ios').includes('geo'));
   assert.ok(appsFor('android').includes('geo') && !appsFor('android').includes('apple'));
-  assert.ok(appsFor('android').includes('tomtom'));
+  assert.ok(!appsFor('ios').includes('tomtom') && !appsFor('android').includes('tomtom'));
   assert.equal(defaultApp('ios'), 'apple');
   assert.equal(defaultApp('android'), 'google');
 });
@@ -34,13 +34,12 @@ test('Google: mehrere Stopps als Zwischenziele (max. 10)', () => {
   assert.equal(u.searchParams.get('waypoints').split('|').length, 9);
 });
 
-test('TomTom, HERE, Sygic, Yandex: Koordinaten', () => {
-  assert.equal(navLink('tomtom', [B]).url, 'tomtomgo://x-callback-url/navigate?destination=52.5291,13.4015');
+test('HERE, Sygic, Yandex: Koordinaten', () => {
   assert.equal(navLink('sygic', [B]).url, 'com.sygic.aura://coordinate|13.4015|52.5291|drive');
   assert.equal(navLink('yandex', [B]).url, 'yandexnavi://build_route_on_map?lat_to=52.5291&lon_to=13.4015');
   assert.match(navLink('here', [B]).url, /^https:\/\/share\.here\.com\/r\/mylocation\/52\.5291,13\.4015,Torstra/);
-  assert.equal(navLink('tomtom', [A, B]).count, 1);
-  assert.equal(navLink('tomtom', [A]).coordsOnly, true);
+  assert.equal(navLink('sygic', [A, B]).count, 1);
+  assert.equal(navLink('sygic', [A]).coordsOnly, true);
 });
 
 test('Android-Auswahl (geo:)', () => {
@@ -50,11 +49,3 @@ test('Android-Auswahl (geo:)', () => {
   assert.equal(isAppScheme('https://maps.apple.com/'), false);
 });
 
-test('TomTom AmiGO: iPhone → nur kopieren, Android → geo:', () => {
-  const ios = navLink('amigo', [B], { platform: 'ios' });
-  assert.equal(ios.url, null);
-  assert.equal(ios.copyOnly, true);
-  assert.equal(ios.text, 'Torstraße 101, 10119 Berlin');
-  assert.match(navLink('amigo', [B], { platform: 'android' }).url, /^geo:52\.5291,13\.4015/);
-  assert.ok(appsFor('ios').includes('amigo') && appsFor('android').includes('amigo'));
-});
