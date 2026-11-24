@@ -25,6 +25,11 @@ const NativeScanner = (() => {
   if (!IS_NATIVE) return null;
   try { return window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin('LabelScanner') : window.Capacitor.Plugins?.LabelScanner; } catch { return null; }
 })();
+// Mini-Fenster über der Navi-App (Android-App)
+const NavOverlay = (() => {
+  if (!IS_NATIVE) return null;
+  try { return window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin('NavOverlay') : window.Capacitor.Plugins?.NavOverlay; } catch { return null; }
+})();
 // Hardware-Scanner (Zebra DataWedge) in der Android-App
 const Zebra = (() => {
   if (!IS_NATIVE) return null;
@@ -49,6 +54,7 @@ const defaults = {
     nav: defaultApp(PLATFORM),
     autoAdd: false,
     saverFirst: true,
+    miniWindow: true, // Android-App: Mini-Fenster mit dem aktuellen Stopp beim Navigieren
     radius: 50,
     trackVisits: true,
     dwellSec: 30,
@@ -160,6 +166,7 @@ function render() {
   $('#tourDateLabel').textContent = t('tour_of', { d: fmtTourDate(state.tourDate) });
   $('#tourOld').hidden = !old;
   $('#tourBar').classList.toggle('old', old);
+  syncMiniSoon();
   $('#btnNewTour').classList.toggle('primary', old);
 
   // Nächster Stopp
@@ -1151,6 +1158,10 @@ function navAddress(s) {
 const navName = (app) => (app === 'geo' ? t('nav_geo') : app === 'ask' ? t('nav_ask') : NAV_APPS[app]?.name || app);
 
 function openNavWith(app, points) {
+  if (NavOverlay && state.settings.miniWindow) return startMiniWindow(app, points);
+  openNavDirect(app, points);
+}
+function openNavDirect(app, points) {
   const { url, count, coordsOnly } = navLink(app, points, { exact: useCoords, address: navAddress });
   if (points.length > count) toast(count > 1 ? t('nav_first_n', { app: navName(app), n: count }) : t('single_dest', { app: navName(app) }), 4000);
   else if (coordsOnly && !useCoords(points[0])) toast(t('nav_coords_hint'), 4500);
@@ -1187,6 +1198,115 @@ $('#btnAllGoogle').addEventListener('click', () => {
 $('#btnOpenNav').addEventListener('click', () => {
   openNav(state.stops.filter((s) => isOpen(s) && hasPos(s)));
 });
+
+/* ---------------- Mini-Fenster beim Navigieren (Android-App) ----------------
+ * Über Google Maps & Co. schwebt ein kleines Fenster mit dem aktuellen Stopp.
+ * "Zugestellt" / "Nicht da" → nächster Stopp, die Navigation dorthin startet sofort.
+ * Die Erledigungen holt die App ab, sobald sie wieder läuft (oder sofort, wenn sie im Hintergrund wach ist).
+ */
+let miniActive = false;
+let miniTimer = null;
+const MINI_BADGE = { plus: 'PLUS 9:00', express: 'EXPRESS 12:00', saver: 'SAVER' };
+const miniCanNav = (s, app) => hasPos(s) || !!NAV_APPS[app]?.text;
+
+/** ein Stopp fürs Mini-Fenster; route: bei Google mit mehreren Zielen die nächsten Stopps ab hier */
+function miniStop(s, app, route) {
+  const { street, city } = splitAddr(s.address);
+  const opt = { exact: useCoords, address: navAddress };
+  let url;
+  if (route) url = navLink('google', route, opt).url;
+  else if (app === 'google') url = 'google.navigation:q=' + (useCoords(s) ? `${s.lat},${s.lon}` : encodeURIComponent(navAddress(s)));
+  else url = navLink(NAV_APPS[app] ? app : 'google', [s], opt).url;
+  return { id: s.id, title: street, sub: city, name: s.name || '', badge: MINI_BADGE[s.service] || '', url, web: navLink('google', [s], opt).url };
+}
+function miniList(order, app, multi) {
+  const list = order.filter((s) => miniCanNav(s, app));
+  return list.map((s, i) => miniStop(s, app, multi ? list.slice(i, i + 10) : null));
+}
+function miniLabels() {
+  return {
+    done: t('mini_done'), fail: t('mini_fail'), nav: t('mini_nav'), app: t('mini_app'), end: t('mini_end'),
+    step: t('mini_step', { i: '{i}', n: '{n}' }), left: t('mini_left', { n: '{n}' }),
+    all_done: t('mini_all_done'), all_done_head: t('mini_all_done_head'), channel: t('mini_channel'),
+  };
+}
+
+async function startMiniWindow(app, points) {
+  try {
+    await applyMiniEvents();
+    const st = await NavOverlay.status();
+    if (!st.overlay) {
+      if (!state.overlayAsked) {
+        state.overlayAsked = true;
+        save();
+        if (confirm(t('mini_perm'))) {
+          await NavOverlay.requestOverlay();
+          return toast(t('mini_perm_back'), 6000);
+        }
+      }
+      // ohne Fenster-Erlaubnis: dieselben Knöpfe in der Benachrichtigung
+      if (!st.notifications) await NavOverlay.requestNotifications();
+    }
+    const multi = points.length > 1 && (NAV_APPS[app]?.multi || 1) > 1;
+    const first = points[0];
+    const order = [first, ...state.stops.filter((s) => isOpen(s) && s !== first)];
+    state.mini = { app, multi };
+    save();
+    await NavOverlay.start({ stops: miniList(order, app, multi), labels: miniLabels(), launch: true });
+    miniActive = true;
+  } catch (e) {
+    console.error(e);
+    openNavDirect(app, points);
+  }
+}
+
+/** Erledigungen aus dem Mini-Fenster übernehmen */
+async function applyMiniEvents() {
+  if (!NavOverlay) return 0;
+  let n = 0;
+  try {
+    const r = await NavOverlay.takeEvents();
+    for (const e of r?.events || []) {
+      const s = state.stops.find((x) => x.id === e.id);
+      if (!s) continue;
+      if (e.status === 'pending') {
+        if (!isOpen(s)) { setStatus(s, 'pending'); n++; }
+      } else if (s.status !== e.status) {
+        setStatus(s, e.status);
+        if (e.at) s.doneAt = e.at;
+        n++;
+      }
+    }
+  } catch {}
+  if (n) { save(); render(); }
+  return n;
+}
+
+/** Änderungen in der App (Reihenfolge, neue/erledigte Stopps) ans Mini-Fenster weitergeben */
+function syncMiniSoon() {
+  if (!miniActive) return;
+  clearTimeout(miniTimer);
+  miniTimer = setTimeout(syncMini, 400);
+}
+async function syncMini() {
+  try {
+    const st = await NavOverlay.status();
+    if (!st.running) { miniActive = false; return; }
+    await applyMiniEvents();
+    const { app, multi } = state.mini || { app: 'google', multi: false };
+    await NavOverlay.update({ stops: miniList(state.stops.filter(isOpen), app, multi) });
+  } catch {}
+}
+function miniEnd() {
+  miniActive = false;
+  NavOverlay?.stop().catch(() => {});
+}
+if (NavOverlay) {
+  NavOverlay.addListener('change', () => applyMiniEvents());
+  NavOverlay.status().then((st) => { miniActive = !!st.running; }).catch(() => {});
+  applyMiniEvents();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') applyMiniEvents(); });
+}
 
 /* ---------------- Einstellungen: Navi-Auswahl je nach Gerät ---------------- */
 function fillNavSelect() {
@@ -1234,6 +1354,7 @@ function startNewTour(scan) {
   state.stops = ex ? ex.stops.map((s) => ({ ...s, id: uid(), status: s.status || 'pending', createdAt: Date.now() })) : [];
   state.route = null;
   state.tourDate = d;
+  miniEnd();
   save();
   render();
   dlgNT.close();
@@ -1675,6 +1796,8 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setNav').value = s.nav;
   $('#setAutoAdd').checked = s.autoAdd;
   $('#setSaverFirst').checked = s.saverFirst;
+  $('#rowMini').hidden = !NavOverlay;
+  $('#setMini').checked = s.miniWindow !== false;
   $('#setRadius').value = String(s.radius || 50);
   $('#setTrack').checked = !!s.trackVisits;
   $('#setDwell').value = String(s.dwellSec || 30);
@@ -1691,10 +1814,12 @@ $('#btnSaveSettings').addEventListener('click', () => {
     nav: $('#setNav').value,
     autoAdd: $('#setAutoAdd').checked,
     saverFirst: $('#setSaverFirst').checked,
+    miniWindow: $('#setMini').checked,
     radius: +$('#setRadius').value || 50,
     trackVisits: $('#setTrack').checked,
     dwellSec: +$('#setDwell').value || 30,
   });
+  if (state.settings.miniWindow) state.overlayAsked = false; // beim nächsten Navigieren noch einmal nach der Erlaubnis fragen
   save();
   startTracking();
   setLang(state.settings.lang);
@@ -1707,6 +1832,7 @@ $('#btnClearAll').addEventListener('click', () => {
   state.stops = [];
   state.route = null;
   state.tourDate = today();
+  miniEnd();
   save();
   render();
   dlgS.close();
