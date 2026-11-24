@@ -1,5 +1,5 @@
 // App-Shell-Cache für schwaches Netz unterwegs.
-const VERSION = 'v27';
+const VERSION = 'v28';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png',
   'js/app.js', 'js/i18n.js', 'js/address.js', 'js/geocode.js', 'js/autocomplete.js', 'js/memory.js', 'js/navigate.js', 'js/visits.js', 'js/barcode.js', 'js/livescan.js', 'js/maxicode.js', 'js/route.js', 'js/ocr.js',
@@ -7,7 +7,8 @@ const SHELL = [
 const CDN = 'https://cdn.jsdelivr.net/';
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open('shell-' + VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' – am HTTP-Cache des Browsers vorbei, sonst landen alte Dateien im neuen Paket
+  e.waitUntil(caches.open('shell-' + VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -32,10 +33,12 @@ self.addEventListener('fetch', (e) => {
     );
     return;
   }
-  // App-Dateien: Netz zuerst, sonst Cache
+  // App-Dateien: Netz zuerst (immer beim Server nachfragen – GitHub Pages erlaubt sonst 10 min alte Kopien,
+  // dann passen neue Seite und alte Skripte nicht zusammen), ohne Netz aus dem Cache
   if (new URL(url).origin === location.origin) {
+    const req = e.request.mode === 'navigate' ? url : e.request;
     e.respondWith(
-      fetch(e.request)
+      fetch(req, { cache: 'no-cache' })
         .then((res) => {
           if (res.ok) caches.open('shell-' + VERSION).then((c) => c.put(e.request, res.clone()));
           return res;
