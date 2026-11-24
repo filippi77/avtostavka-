@@ -638,3 +638,7 @@ dialog.quick::backdrop { background: #000; }
 .q-thumb { width: 92px; max-height: 64px; object-fit: contain; border-radius: 8px; border: 2px solid rgba(255,255,255,.6); background: #fff; flex: none; }
 .q-last-row .q-last { flex: 1; }
 .q-thumb[hidden] + .q-last { text-align: center; }
+
+/* Zeile unter dem nächsten Stopp: bis zu 5 Knöpfe – Beschriftungen dürfen nicht ineinanderlaufen */
+.next-more .btn span { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-more .btn.danger { color: var(--red, #c62828); }

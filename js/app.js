@@ -239,6 +239,7 @@ function nextCardHtml(s) {
       <button class="btn plain" data-act="show" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}<span>${t('show_on_map')}</span></button>
       <button class="btn plain ${isExpress(s) ? 'on' : ''}" data-act="express">${ICON.bolt}<span>Express</span></button>
       <button class="btn plain" data-act="edit">${ICON.edit}<span>${t('edit')}</span></button>
+      <button class="btn plain danger" data-act="del">${ICON.del}<span>${t('delete')}</span></button>
     </div>`;
 }
 
