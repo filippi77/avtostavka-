@@ -1,5 +1,5 @@
 // App-Shell-Cache für schwaches Netz unterwegs.
-const VERSION = 'v34';
+const VERSION = 'v35';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png',
   'js/app.js', 'js/i18n.js', 'js/address.js', 'js/geocode.js', 'js/autocomplete.js', 'js/memory.js', 'js/navigate.js', 'js/visits.js', 'js/barcode.js', 'js/livescan.js', 'js/maxicode.js', 'js/route.js', 'js/ocr.js',

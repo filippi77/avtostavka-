@@ -142,7 +142,11 @@ function showView(v) {
     if (map) setTimeout(() => { map.invalidateSize(); renderMap(); }, 0);
   }
 }
-document.querySelectorAll('.tab[data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+document.querySelectorAll('.tab[data-view]').forEach((b) => b.addEventListener('click', () => {
+  // nochmal auf „Tour“ tippen → nach oben
+  if (b.dataset.view === currentView) window.scrollTo({ top: 0, behavior: 'smooth' });
+  showView(b.dataset.view);
+}));
 
 /* ---------------- Tour-Liste ---------------- */
 
@@ -187,6 +191,11 @@ function render() {
 
   // Erledigt
   $('#doneWrap').hidden = done.length === 0;
+  // alles erledigt: deutlich sagen und die erledigten Stopps zeigen
+  const allDone = total > 0 && pending.length === 0;
+  if (allDone && $('#allDone').hidden) $('#doneWrap').open = true;
+  $('#allDone').hidden = !allDone;
+  $('#allDoneText').textContent = t('all_done_text', { n: done.filter((s) => s.status === 'delivered').length, f: done.filter((s) => s.status === 'failed').length });
   $('#doneCount').textContent = done.length;
   $('#doneList').innerHTML = done.map((s) => rowHtml(s, null)).join('');
 
@@ -1421,7 +1430,7 @@ function startNewTour(scan) {
   toast(t('new_tour_started', { d: fmtTourDate(d) }));
   if (scan) openQuick();
 }
-for (const id of ['#btnNewTour', '#btnNewTour2']) $(id).addEventListener('click', openNewTour);
+for (const id of ['#btnNewTour', '#btnNewTour2', '#btnAllDoneNew']) $(id).addEventListener('click', openNewTour);
 $('#newTourDate').addEventListener('input', updateNewTourInfo);
 $('#btnNewTourOk').addEventListener('click', () => startNewTour(false));
 $('#btnNewTourScan').addEventListener('click', () => startNewTour(true));

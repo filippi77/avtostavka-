@@ -659,3 +659,11 @@ dialog.quick::backdrop { background: #000; }
 .return-btns { display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; }
 .return-btns .btn { min-height: 54px; font-size: 16px; font-weight: 800; }
 .return-btns .btn.warn { background: #c2410c; color: #fff; }
+
+/* ---------- alles erledigt ---------- */
+.all-done { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 22px 16px; margin: 8px 0; background: var(--surface); border-radius: var(--radius); }
+.all-done[hidden] { display: none; }
+.all-done-icon { font-size: 40px; line-height: 1; }
+.all-done b { font-size: 20px; }
+.all-done span { color: var(--muted); font-size: 14px; }
+.all-done .btn { margin-top: 8px; min-width: 60%; }
