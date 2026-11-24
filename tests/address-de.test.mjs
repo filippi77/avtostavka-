@@ -158,3 +158,26 @@ test('OCR-Müll hinter der Hausnummer (Punkte eines MaxiCodes)', () => {
   assert.equal(r.address, 'Rosenthaler Strasse 40, 10178 Berlin');
   assert.equal(r.name, 'Lisa Wagner');
 });
+
+test('Echtes UPS-Etikett (OCR mit Rahmenresten, Firmenzeilen über der Straße)', () => {
+  const ocr = `| I m = ee on oN
+HERR P4TSCH MM 24 KG 1 OF 1
+Te ARBEITSSCHUTZ GMBH SHP#: 184W 5XFX XPV
+2 ROBERT-BOSCH-STRASSE No SHP WT: 24.0 KG
+50181 BEDBURG DATE: 23 NOV 2026
+SHIP TO:
+RRL KST 930
+CCER DEUTSCHLAND GMBH
+| INDUSTRIESTRASSE 6-8
+31135 HILDESHEIM
+8 5 _-
+= DEU 093 9-00
+Fe JIN |
+UPS STANDARD :
+TRACKING #: 1Z 184 W5X 68 4076 0412 |`;
+  const r = extractAddress(ocr);
+  assert.equal(r.address, 'Industriestrasse 6-8, 31135 Hildesheim');
+  assert.equal(r.tracking, '1Z184W5X6840760412');
+  assert.equal(r.service, '');
+  assert.match(r.name, /Deutschland GmbH/);
+});

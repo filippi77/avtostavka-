@@ -49,3 +49,14 @@ test('MaxiCode: PLZ mit aufgefüllten Nullen (Mode 2), Österreich 4-stellig', (
   assert.equal(at.postcode, '1070');
   assert.equal(scanAddress(at), 'MARIAHILFER STRASSE 88, 1070 WIEN');
 });
+
+test('Echtes UPS-Etikett (Adresse komprimiert): PLZ, Service, vollständige 1Z', () => {
+  const data = '[)>\u001e01\u001d9631135 \u001d276\u001d068\u001d1Z40760412\u001dUPSN\u001d184W5X\u001e07VDOCKO7\u001d&X*H&R,,723( C(#J0(V0#P+B9#/V1-/\'45T\r\u001e\u0004';
+  const r = parseScan(data, 'MaxiCode');
+  assert.equal(r.kind, 'maxicode');
+  assert.equal(r.postcode, '31135');
+  assert.equal(r.country, '276');
+  assert.equal(r.service, '');
+  assert.equal(r.tracking, '1Z184W5X6840760412');
+  assert.equal(scanAddress(r), '');
+});

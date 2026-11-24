@@ -65,7 +65,10 @@ function ringMatch(runs, k) {
     if (Math.abs(a - b) > Math.max(2, Math.max(a, b) * 0.5)) return null;
   }
   const c = r[5].start + r[5].len / 2;
-  const D = r[10].start + r[10].len - r[0].start;
+  // Durchmesser über die Mitte des mittleren Rings (Läufe 2 und 8) – robust gegen Unschärfe und
+  // gegen Sechsecke, die den äußeren Ring berühren. Faktor aus der Geometrie (äußerer Ø / mittlerer Ø).
+  const mid = (x) => x.start + x.len / 2;
+  const D = (mid(r[8]) - mid(r[2])) * 1.759;
   return { c, D, u };
 }
 
@@ -129,62 +132,69 @@ export function findBullseyes(g, w, h, step = 2) {
 }
 
 /**
- * Symbol um die Zielscheibe für Drehwinkel `deg` gerade ausschneiden.
- * Es wird großzügig ausgeschnitten; die echten Symbolränder werden danach an der Dichte der
- * dunklen Punkte erkannt (das Symbol ist von Text durch eine helle Ruhezone getrennt).
- * Alles außerhalb wird weiß – so braucht zxing keinen exakten Maßstab.
+ * Symbol um die Zielscheibe für Drehwinkel `deg` gerade und exakt nach Geometrie ausschneiden,
+ * außen weiß (UPS-Etiketten haben Rahmenlinien direkt neben dem Symbol – die müssen weg).
+ * scale gleicht Ungenauigkeiten des gemessenen Durchmessers aus.
  * Liefert { data, width, height } (RGBA).
  */
-export function extract(g, w, h, be, deg, px = 62, thr = 128) {
-  const s = be.D / px;
+export function extract(g, w, h, be, deg, px = 62, scale = 1) {
+  const s = (be.D * scale) / px;
   const a = (deg * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
-  const k = 1.25; // Reserve für ungenaue Größe
-  const L = GEO.left * px * k, R = GEO.right * px * k, T = GEO.top * px * k, B = GEO.bottom * px * k;
-  const ow = Math.round(L + R), oh = Math.round(T + B);
-  const gray = new Uint8Array(ow * oh).fill(255);
-  for (let y = 0; y < oh; y++) {
-    const dy = (y - T) * s;
-    for (let x = 0; x < ow; x++) {
-      const dx = (x - L) * s;
+  const L = GEO.left * px, R = GEO.right * px, T = GEO.top * px, B = GEO.bottom * px;
+  const m = 8;
+  const ow = Math.round(L + R) + 2 * m, oh = Math.round(T + B) + 2 * m;
+  const out = new Uint8ClampedArray(ow * oh * 4).fill(255);
+  for (let y = m; y < oh - m; y++) {
+    const dy = (y - m - T) * s;
+    for (let x = m; x < ow - m; x++) {
+      const dx = (x - m - L) * s;
       const sx = be.x + dx * ca - dy * sa, sy = be.y + dx * sa + dy * ca;
       const xi = sx | 0, yi = sy | 0;
       if (xi < 0 || yi < 0 || xi >= w - 1 || yi >= h - 1) continue;
       const fx = sx - xi, fy = sy - yi, i = yi * w + xi;
-      gray[y * ow + x] = (g[i] * (1 - fx) + g[i + 1] * fx) * (1 - fy) + (g[i + w] * (1 - fx) + g[i + w + 1] * fx) * fy;
-    }
-  }
-  // Ränder suchen: von der Mitte nach außen, bis eine Lücke von ~1 Modul ohne dunkle Punkte kommt
-  const gap = Math.max(4, Math.round(px * 0.13));
-  const cx = Math.round(L), cy = Math.round(T);
-  const band = (fixedIsX, idx, from, to) => {
-    for (let t = from; t < to; t++) {
-      const v = fixedIsX ? gray[t * ow + idx] : gray[idx * ow + t];
-      if (v < thr) return true;
-    }
-    return false;
-  };
-  const ry0 = Math.round(T - GEO.top * px * 1.1), ry1 = Math.round(T + GEO.bottom * px * 1.1);
-  const rx0 = Math.round(L - GEO.left * px * 1.1), rx1 = Math.round(L + GEO.right * px * 1.1);
-  const edge = (start, step, limit, fixedIsX, from, to) => {
-    let last = start, empty = 0;
-    for (let i = start; i !== limit; i += step) {
-      if (band(fixedIsX, i, Math.max(0, from), Math.min(fixedIsX ? oh : ow, to))) { last = i; empty = 0; }
-      else if (++empty >= gap) break;
-    }
-    return last;
-  };
-  const x0 = edge(cx, -1, -1, true, ry0, ry1), x1 = edge(cx, 1, ow, true, ry0, ry1);
-  const y0 = edge(cy, -1, -1, false, x0, x1 + 1), y1 = edge(cy, 1, oh, false, x0, x1 + 1);
-  const m = 6;
-  const W = x1 - x0 + 1 + 2 * m, H = y1 - y0 + 1 + 2 * m;
-  const out = new Uint8ClampedArray(W * H * 4).fill(255);
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const v = gray[y * ow + x], o = ((y - y0 + m) * W + (x - x0 + m)) * 4;
+      const v = (g[i] * (1 - fx) + g[i + 1] * fx) * (1 - fy) + (g[i + w] * (1 - fx) + g[i + w + 1] * fx) * fy;
+      const o = (y * ow + x) * 4;
       out[o] = out[o + 1] = out[o + 2] = v;
     }
   }
-  return { data: out, width: W, height: H };
+  clearFrameLines(out, ow, oh, m);
+  return { data: out, width: ow, height: oh };
+}
+
+/**
+ * Durchgehende Linien am Rand entfernen: UPS druckt Rahmenlinien direkt an den MaxiCode,
+ * die beim Ausschneiden mit hineinrutschen. Eine Punktreihe des Codes ist nie fast ganz schwarz,
+ * eine gedruckte Linie schon.
+ */
+function clearFrameLines(px, w, h, m) {
+  // Papier- und Druckhelligkeit aus dem Histogramm der Innenfläche (90 % / 5 %)
+  const hist = new Uint32Array(256);
+  let n = 0;
+  for (let y = m; y < h - m; y += 2) for (let x = m; x < w - m; x += 2) { hist[px[(y * w + x) * 4]]++; n++; }
+  const pct = (q) => { let c = 0; for (let v = 0; v < 256; v++) { c += hist[v]; if (c >= n * q) return v; } return 255; };
+  const lo = pct(0.05), hi = pct(0.9);
+  if (hi - lo < 40) return;
+  // auch blasse (beim Verkleinern grau gewordene) Linien erfassen
+  const thr = hi - (hi - lo) * 0.3;
+  const band = Math.round(Math.min(w, h) * 0.09);
+  const dark = (x, y) => px[(y * w + x) * 4] < thr;
+  const white = (x, y) => { const o = (y * w + x) * 4; px[o] = px[o + 1] = px[o + 2] = 255; };
+  const rows = [], cols = [];
+  for (let y = m; y < h - m; y++) {
+    if (y >= m + band && y < h - m - band) continue;
+    let n = 0;
+    for (let x = m; x < w - m; x++) n += dark(x, y);
+    if (n > (w - 2 * m) * 0.8) rows.push(y);
+  }
+  for (let x = m; x < w - m; x++) {
+    if (x >= m + band && x < w - m - band) continue;
+    let n = 0;
+    for (let y = m; y < h - m; y++) n += dark(x, y);
+    if (n > (h - 2 * m) * 0.8) cols.push(x);
+  }
+  // Linie plus je 1 px Saum (Kantenunschärfe)
+  for (const y of rows) for (let yy = y - 1; yy <= y + 1; yy++) if (yy >= 0 && yy < h) for (let x = 0; x < w; x++) white(x, yy);
+  for (const x of cols) for (let xx = x - 1; xx <= x + 1; xx++) if (xx >= 0 && xx < w) for (let y = 0; y < h; y++) white(xx, y);
 }
 
 let lastDeg = 0;
@@ -201,26 +211,31 @@ function angleOrder() {
   return out;
 }
 
+const SCALES_FAST = [1, 0.97, 1.03, 0.94, 1.06, 0.91, 1.09];
+const SCALES_SLOW = [1, 0.96, 1.04];
+
 export async function readMaxiCode(img, read, { budgetMs = 250 } = {}) {
   const t0 = Date.now();
   const g = toGray(img);
-  const thr = otsu(g);
   const all = findBullseyes(g, img.width, img.height);
   if (!all.length) return null;
   // größte Zielscheibe (nächstes Etikett) samt nahe beieinander liegender Varianten
   const main = all.reduce((a, b) => (b.D > a.D ? b : a));
-  const variants = all.filter((f) => Math.hypot(f.x - main.x, f.y - main.y) < main.D / 2).slice(0, 2);
+  const variants = all.filter((f) => Math.hypot(f.x - main.x, f.y - main.y) < main.D / 2).slice(0, 3);
   // dieselbe Zielscheibe wie im letzten Bild → Suche dort fortsetzen
-  const same = search && Math.hypot(search.x - main.x, search.y - main.y) < main.D * 0.6 && Math.abs(search.D - main.D) < main.D * 0.15;
+  const same = search && Math.hypot(search.x - main.x, search.y - main.y) < main.D * 0.6 && Math.abs(search.D - main.D) < main.D * 0.2;
   if (!same) search = { x: main.x, y: main.y, D: main.D, i: 0, order: angleOrder() };
   while (search.i < search.order.length) {
     const deg = search.order[search.i++];
-    for (const be of variants) {
-      const res = await read(extract(g, img.width, img.height, be, deg, 62, thr));
-      if (res?.length) {
-        lastDeg = deg;
-        search = null;
-        return { text: res[0].text, bullseye: be, deg };
+    const scales = search.i <= 50 ? SCALES_FAST : SCALES_SLOW;
+    for (const sc of scales) {
+      for (const be of variants) {
+        const res = await read(extract(g, img.width, img.height, be, deg, 62, sc));
+        if (res?.length) {
+          lastDeg = deg;
+          search = null;
+          return { text: res[0].text, bullseye: be, deg };
+        }
       }
     }
     if (Date.now() - t0 > budgetMs) return { text: null, bullseye: main };

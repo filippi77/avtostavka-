@@ -47,7 +47,11 @@ export class LiveScanner {
     this.Z = Z;
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      // Auflösung passend zur Haltung des Handys anfragen (hochkant → 1080×1920), sonst wird das Bild
+      // beschnitten oder verzerrt – die Ringe des MaxiCodes müssen rund bleiben
+      video: window.innerHeight > window.innerWidth
+        ? { facingMode: { ideal: 'environment' }, width: { ideal: 1080 }, height: { ideal: 1920 } }
+        : { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
     });
     this.video.srcObject = this.stream;
     this.video.setAttribute('playsinline', ''); // iPhone: nicht im Vollbild-Player öffnen
@@ -113,8 +117,8 @@ export class LiveScanner {
     if (!v.videoWidth || this.busy) return;
     this.busy = true;
     try {
-      // auf max. 1280 px verkleinern – schneller, MaxiCode bleibt gut lesbar
-      const scale = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+      // volle Auflösung bis 1920 px: bei 1280 px werden die MaxiCode-Punkte echter Etiketten zu klein
+      const scale = Math.min(1, 1920 / Math.max(v.videoWidth, v.videoHeight));
       const w = Math.round(v.videoWidth * scale);
       const h = Math.round(v.videoHeight * scale);
       if (this.canvas.width !== w) { this.canvas.width = w; this.canvas.height = h; }

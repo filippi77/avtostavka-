@@ -41,6 +41,9 @@ function fixOcr(line) {
     .replace(/(\d)[OО](?=[\d\s,]|$)/g, (_, d) => d + '0')
     .replace(/(\d)[OО](?=[\d\s,]|$)/g, (_, d) => d + '0')
     .replace(/(\d)[lI|](?=\d)/g, (_, d) => d + '1')
+    // Reste von Rahmenlinien/Kanten am Zeilenanfang und -ende ("| INDUSTRIESTRASSE 6-8 |")
+    .replace(/^[\s|¦!\[\](){}_=~—–:;,.'`*•·>]+(?=[\p{L}\d])/u, '')
+    .replace(/([\p{L}\d.])[\s|¦\[\](){}_=~—–:;,'`*•·<]+$/u, '$1')
     .trim();
 }
 
@@ -136,10 +139,12 @@ function extractGerman(rawLines) {
     if (!plz) return;
     let si = -1;
     let sScore = 0;
+    // bis zu 3 Zeilen darüber: echte Straßenzeile (Score ≥ 4) vor allgemeiner "Wort + Zahl"-Zeile
     for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
       if (ex.has(j) || DE_STOP.test(lines[j])) break;
       const s = streetScore(lines[j]);
-      if (s > 0) { si = j; sScore = s; break; }
+      if (s > sScore) { si = j; sScore = s; }
+      if (s >= 4) break;
     }
     let score = sScore + (plz.five ? 2 : 1);
     for (let j = i; j >= Math.max(0, i - 7); j--) {
