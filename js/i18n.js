@@ -172,6 +172,11 @@ const dict = {
     help: 'Anleitung',
     help_full: 'Anleitung mit Bildern',
     nav_copied: 'Adresse kopiert 📋 – falls {app} kein Ziel zeigt: Suche antippen → Einfügen',
+    copied: 'Adresse kopiert',
+    copy_step1: 'Öffne',
+    copy_step2: 'Suchfeld antippen und gedrückt halten',
+    copy_step3: '„Einfügen“ → Adresse wählen → Los',
+    copy_again: 'Nochmal kopieren',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -345,6 +350,11 @@ const dict = {
     help: 'Инструкция (нем.)',
     help_full: 'Инструкция с картинками (нем.)',
     nav_copied: 'Адрес скопирован 📋 — если {app} не показал цель: поиск → «Вставить»',
+    copied: 'Адрес скопирован',
+    copy_step1: 'Откройте',
+    copy_step2: 'Нажмите и удерживайте поле поиска',
+    copy_step3: '«Вставить» → выбрать адрес → поехали',
+    copy_again: 'Скопировать ещё раз',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

@@ -10,7 +10,9 @@ export const NAV_APPS = {
   apple: { name: 'Apple Karten', text: true, multi: 1, platforms: ['ios', 'other'] },
   google: { name: 'Google Maps', text: true, multi: 10, platforms: ['ios', 'android', 'other'] },
   waze: { name: 'Waze', text: true, multi: 1, platforms: ['ios', 'android', 'other'] },
-  tomtom: { name: 'TomTom GO', text: false, multi: 1, platforms: ['ios', 'android'] },
+  tomtom: { name: 'TomTom GO Navigation', text: false, multi: 1, platforms: ['ios', 'android'] },
+  // TomTom AmiGO hat auf dem iPhone keinen bekannten Link für Ziele → Adresse kopieren und einfügen
+  amigo: { name: 'TomTom AmiGO', text: true, multi: 1, platforms: ['ios', 'android'], copyOnly: ['ios'] },
   here: { name: 'HERE WeGo', text: false, multi: 1, platforms: ['ios', 'android', 'other'] },
   sygic: { name: 'Sygic', text: false, multi: 1, platforms: ['ios', 'android'] },
   yandex: { name: 'Yandex Navi', text: false, multi: 1, platforms: ['ios', 'android'] },
@@ -38,8 +40,9 @@ const enc = encodeURIComponent;
  * points: Stopps { lat, lon, address }; exact(s): true, wenn die Koordinaten genau sind (Haus / von Hand).
  * Liefert { url, count } – count = wie viele Stopps tatsächlich übergeben wurden.
  */
-export function navLink(app, points, { exact = () => true, address = (s) => s.address } = {}) {
+export function navLink(app, points, { exact = () => true, address = (s) => s.address, platform = 'ios' } = {}) {
   const cfg = NAV_APPS[app] || NAV_APPS.google;
+  if (cfg.copyOnly?.includes(platform)) return { url: null, count: 1, coordsOnly: false, copyOnly: true, text: address(points[0]) };
   const list = points.slice(0, cfg.multi);
   const first = list[0];
   const ll = (s) => `${s.lat},${s.lon}`;
@@ -71,6 +74,7 @@ export function navLink(app, points, { exact = () => true, address = (s) => s.ad
     case 'yandex':
       url = `yandexnavi://build_route_on_map?lat_to=${first.lat}&lon_to=${first.lon}`;
       break;
+    case 'amigo': // Android: System-Link geo:, AmiGO erscheint in der Auswahl, falls installiert
     case 'geo':
       // Android zeigt die Auswahl aller installierten Navi-Apps
       url = asText(first) ? `geo:0,0?q=${enc(address(first))}` : `geo:${ll(first)}?q=${ll(first)}(${enc(address(first))})`;

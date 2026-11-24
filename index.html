@@ -327,6 +327,27 @@
     </form>
   </dialog>
 
+  <!-- Adresse kopiert (Navi-Apps ohne Ziel-Link) -->
+  <dialog id="dlgCopy" class="sheet">
+    <div class="grabber"></div>
+    <form method="dialog" class="sheet-body">
+      <div class="sheet-head">
+        <h2>📋 <span data-i18n="copied">Adresse kopiert</span></h2>
+        <button class="x-btn" value="cancel" data-i18n-aria="close">✕</button>
+      </div>
+      <div class="copy-addr" id="copyAddr"></div>
+      <ol class="copy-steps">
+        <li><span data-i18n="copy_step1">Öffne</span> <b id="copyApp"></b></li>
+        <li data-i18n="copy_step2">Suchfeld antippen und gedrückt halten</li>
+        <li data-i18n="copy_step3">„Einfügen“ → Adresse wählen → Los</li>
+      </ol>
+      <div class="sheet-foot">
+        <button type="button" class="btn" id="btnCopyAgain" data-i18n="copy_again">Nochmal kopieren</button>
+        <button class="btn primary" value="ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast" role="status"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>

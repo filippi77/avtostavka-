@@ -428,7 +428,7 @@ $('#btnGallery').addEventListener('click', () => $('#fileGallery').click());
 $('#fileCamera').addEventListener('change', onPhoto);
 $('#fileGallery').addEventListener('change', onPhoto);
 // Tippen auf den abgedunkelten Hintergrund schließt das Sheet
-for (const d of [dlg, $('#dlgSettings'), $('#dlgTours'), $('#dlgNav')]) {
+for (const d of [dlg, $('#dlgSettings'), $('#dlgTours'), $('#dlgNav'), $('#dlgCopy')]) {
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 }
 
@@ -1077,7 +1077,8 @@ function navAddress(s) {
 const navName = (app) => (app === 'geo' ? t('nav_geo') : app === 'ask' ? t('nav_ask') : NAV_APPS[app]?.name || app);
 
 function openNavWith(app, points) {
-  const { url, count, coordsOnly } = navLink(app, points, { exact: useCoords, address: navAddress });
+  const { url, count, coordsOnly, copyOnly, text: copyText } = navLink(app, points, { exact: useCoords, address: navAddress, platform: PLATFORM });
+  if (copyOnly) return showCopySheet(app, copyText);
   if (coordsOnly) {
     // Manche Apps (z. B. TomTom AmiGO) übernehmen das Ziel aus dem Link nicht →
     // Adresse zusätzlich in die Zwischenablage, dann in der App einfach einfügen
@@ -1093,6 +1094,19 @@ function openNavWith(app, points) {
   if (IS_NATIVE || isAppScheme(url)) window.location.href = url;
   else window.open(url, '_blank');
 }
+
+/** Adresse kopieren und Anleitung zeigen (für Apps ohne Ziel-Link, z. B. TomTom AmiGO auf dem iPhone) */
+function copyText(text) {
+  window.__lastClip = text; // für automatisierte Tests
+  try { navigator.clipboard?.writeText(text).catch(() => {}); } catch {}
+}
+function showCopySheet(app, text) {
+  copyText(text);
+  $('#copyApp').textContent = navName(app);
+  $('#copyAddr').textContent = text;
+  $('#dlgCopy').showModal();
+}
+$('#btnCopyAgain').addEventListener('click', () => { copyText($('#copyAddr').textContent); toast(t('copied')); });
 
 let navPending = [];
 function openNav(points) {

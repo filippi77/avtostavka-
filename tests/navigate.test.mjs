@@ -49,3 +49,12 @@ test('Android-Auswahl (geo:)', () => {
   assert.equal(isAppScheme('geo:1,2'), true);
   assert.equal(isAppScheme('https://maps.apple.com/'), false);
 });
+
+test('TomTom AmiGO: iPhone → nur kopieren, Android → geo:', () => {
+  const ios = navLink('amigo', [B], { platform: 'ios' });
+  assert.equal(ios.url, null);
+  assert.equal(ios.copyOnly, true);
+  assert.equal(ios.text, 'Torstraße 101, 10119 Berlin');
+  assert.match(navLink('amigo', [B], { platform: 'android' }).url, /^geo:52\.5291,13\.4015/);
+  assert.ok(appsFor('ios').includes('amigo') && appsFor('android').includes('amigo'));
+});
