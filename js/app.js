@@ -5,7 +5,7 @@ import { suggest } from './autocomplete.js';
 import { normKey, remember, updatePosition, lookup, searchBook, frequent, pruneBook, autosaveTour, saveNamedTour, restoreStops, today } from './memory.js';
 import { buildRoute, haversine } from './route.js';
 import { DwellTracker, pruneVisits, visitsCsv } from './visits.js';
-import { NAV_APPS, navLink, appsFor, platformOf, defaultApp, isAppScheme } from './navigate.js';
+import { NAV_APPS, navLink, appsFor, platformOf, defaultApp, isAppScheme, iosAppLink } from './navigate.js';
 import { recognize, warmUp } from './ocr.js';
 import { LiveScanner, unlockAudio, beep, loadZXing } from './livescan.js';
 import { suggest as suggestFast } from './autocomplete.js';
@@ -1173,6 +1173,14 @@ function openNavDirect(app, points) {
   // merken, wohin navigiert wird – bei der Rückkehr in die App: „Zugestellt → nächster Stopp“
   state.navTo = { id: points[0].id, app, at: Date.now(), multi: points.length > 1 };
   save();
+  // iPhone: Google Maps / Waze direkt als App öffnen; ist die App nicht da, nach kurzer Zeit die Webseite
+  const appUrl = PLATFORM === 'ios' && !IS_NATIVE && points.length === 1 ? iosAppLink(app, points, { exact: useCoords, address: navAddress }) : null;
+  if (appUrl) {
+    window.__lastNav = appUrl;
+    window.location.href = appUrl;
+    setTimeout(() => { if (document.visibilityState === 'visible') window.open(url, '_blank'); }, 1500);
+    return;
+  }
   // App-Schemata (yandexnavi:, geo: …) und die Android-App: direkt aufrufen; Webseiten im neuen Tab
   if (IS_NATIVE || isAppScheme(url)) window.location.href = url;
   else window.open(url, '_blank');
