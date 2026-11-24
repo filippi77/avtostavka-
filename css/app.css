@@ -624,7 +624,7 @@ dialog.quick::backdrop { background: #000; }
 #newTourDate { min-height: 40px; }
 
 /* ---------- Schnellerfassung: Modus „Nur Adresse“ ---------- */
-.q-seg { display: grid; grid-template-columns: 1fr 1fr; background: rgba(255,255,255,.15); border-radius: 12px; padding: 3px; gap: 3px; }
+.q-seg { display: grid; grid-template-columns: 1fr 1fr 1fr; background: rgba(255,255,255,.15); border-radius: 12px; padding: 3px; gap: 3px; }
 .q-seg button { border: 0; border-radius: 10px; min-height: 38px; background: transparent; color: #fff; font: inherit; font-size: 15px; font-weight: 700; }
 .q-seg button.active { background: var(--gold); color: #351c15; }
 .q-photo-text { display: none; }
@@ -667,3 +667,11 @@ dialog.quick::backdrop { background: #000; }
 .all-done b { font-size: 20px; }
 .all-done span { color: var(--muted); font-size: 14px; }
 .all-done .btn { margin-top: 8px; min-width: 60%; }
+
+/* Modus „Liste“: großer Rahmen, gleiche Auslöse-Taste wie „Nur Adresse“ */
+.quick.mode-list .q-photo-code { display: none; }
+.quick.mode-list .q-photo-text { display: inline; }
+.quick.mode-list #btnQuickPhoto { background: var(--gold); color: #351c15; font-size: 18px; font-weight: 800; }
+.quick.mode-list #btnQuickFinish { background: rgba(255,255,255,.15); color: #fff; }
+.quick.mode-list .q-frame { top: calc(12% + 24vh); width: 92vw; height: 46vh; aspect-ratio: auto; border-radius: 14px; }
+.q-seg button { font-size: 14px; padding: 0 4px; }

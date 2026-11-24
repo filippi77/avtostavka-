@@ -41,11 +41,11 @@ function fixOcr(line) {
     .replace(/(\d)[OО](?=[\d\s,]|$)/g, (_, d) => d + '0')
     .replace(/(\d)[OО](?=[\d\s,]|$)/g, (_, d) => d + '0')
     .replace(/(\d)[lI|](?=\d)/g, (_, d) => d + '1')
-    // ß wird auf Etiketten oft als B oder 8 gelesen: "BAVENSTEDTER STRABE 102" → "STRASSE"
+    // ß wird auf Etiketten oft als B oder 8 gelesen: "LINDENER STRABE 102" → "STRASSE"
     .replace(/(s)(tra)[b8](e)(?=[\s\d,.]|$)/giu, (_, s1, t, e) => s1 + t + (t === t.toUpperCase() ? 'SS' : 'ß') + e)
-    // kurze Müll-Stücke vom Rand am Zeilenanfang ("Il? VARDUHI …", "&:| 31137 …", "); 0176…")
+    // kurze Müll-Stücke vom Rand am Zeilenanfang ("Il? MAX MUSTER", "&:| 12345 …", "); 0170…")
     .replace(/^(?:\S{0,3}[?|¦:;&)(\][{}]\S{0,2}\s+)+(?=[\p{L}\d+])/u, '')
-    // Reste von Rahmenlinien/Kanten am Zeilenanfang und -ende ("| INDUSTRIESTRASSE 6-8 |")
+    // Reste von Rahmenlinien/Kanten am Zeilenanfang und -ende ("| HAUPTSTRASSE 6-8 |")
     .replace(/^[\s|¦!\[\](){}_=~—–:;,.'`*•·>]+(?=[\p{L}\d])/u, '')
     .replace(/([\p{L}\d.])[\s|¦\[\](){}_=~—–:;,'`*•·<]+$/u, '$1')
     .trim();

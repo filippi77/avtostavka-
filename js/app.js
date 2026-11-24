@@ -1,4 +1,5 @@
 import { extractAddress, smartCase } from './address.js';
+import { extractAddressList } from './addrlist.js';
 import { parseScan, scanAddress } from './barcode.js';
 import { geocode, reverse } from './geocode.js';
 import { suggest } from './autocomplete.js';
@@ -1473,7 +1474,7 @@ async function openQuick() {
   try {
     await sc.start();
     if (!quick) return sc.stop();
-    $('#quickStatus').textContent = t(quickMode() === 'code' ? 'quick_ready' : 'quick_text_hint');
+    $('#quickStatus').textContent = t(QUICK_HINT[quickMode()]);
   } catch (err) {
     console.error(err);
     $('#quickStatus').textContent = err?.message === 'ZXing' ? t('quick_lib_error') : t('quick_cam_error');
@@ -1562,24 +1563,26 @@ async function quickAdd(r, getSnapshot) {
  *  - 'code': MaxiCode/Strichcode live lesen (Sendungsnummer, Service), Adresse per Texterkennung im Hintergrund
  *  - 'text': nur Adresse – auslösen per Taste oder Tippen aufs Bild, nur der Rahmen wird gelesen
  */
-const quickMode = () => (state.settings.quickMode === 'text' ? 'text' : 'code');
+const quickMode = () => (['text', 'list'].includes(state.settings.quickMode) ? state.settings.quickMode : 'code');
+const QUICK_HINT = { code: 'quick_ready', text: 'quick_text_hint', list: 'quick_list_hint' };
 function setQuickMode(m) {
   state.settings.quickMode = m;
   save();
   $('#dlgQuick').classList.toggle('mode-text', m === 'text');
+  $('#dlgQuick').classList.toggle('mode-list', m === 'list');
   for (const b of document.querySelectorAll('#quickModeSeg button')) b.classList.toggle('active', b.dataset.mode === m);
   if (quick?.scanner) {
     quick.scanner.codes = m === 'code';
-    if (m === 'text') quick.scanner.lastSymbol = null;
+    if (m !== 'code') quick.scanner.lastSymbol = null;
   }
-  if (quick) $('#quickStatus').textContent = t(m === 'code' ? 'quick_ready' : 'quick_text_hint');
+  if (quick) $('#quickStatus').textContent = t(QUICK_HINT[m]);
 }
 $('#quickModeSeg').addEventListener('click', (e) => {
   const b = e.target.closest('[data-mode]');
   if (b) setQuickMode(b.dataset.mode);
 });
 // Nur Adresse: Tippen aufs Bild löst aus
-$('#quickVideo').addEventListener('click', () => { if (quickMode() === 'text') quickPhoto(); });
+$('#quickVideo').addEventListener('click', () => { if (quickMode() !== 'code') quickPhoto(); });
 
 /** Foto-Taste: Etikett ohne lesbaren Code / Modus „Nur Adresse“ → nur Text erkennen */
 async function quickPhoto() {
@@ -1587,7 +1590,7 @@ async function quickPhoto() {
   const now = Date.now();
   if (now - (quick.lastShot || 0) < 600) return; // Doppeltipp
   quick.lastShot = now;
-  const blob = await quick.scanner.snapshot(quickMode() === 'text' ? $('#dlgQuick .q-frame') : null);
+  const blob = await quick.scanner.snapshot(quickMode() !== 'code' ? $('#dlgQuick .q-frame') : null);
   if (!blob) return;
   // Vorschau: so sieht man sofort, was aufgenommen wurde
   const th = $('#quickThumb');
@@ -1595,6 +1598,14 @@ async function quickPhoto() {
   th.dataset.url = URL.createObjectURL(blob);
   th.src = th.dataset.url;
   th.hidden = false;
+  if (quickMode() === 'list') {
+    // ganze Liste: Stopps entstehen erst nach dem Lesen (nur neue Adressen)
+    ocrQueue.push({ list: true, blob });
+    beep('text');
+    quickFlash('text', t('quick_list_queued'));
+    pumpQueues();
+    return;
+  }
   const stop = { id: uid(), address: '⏳', name: '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'ocr' };
   placeStop(stop);
   save();
@@ -1624,6 +1635,7 @@ async function ocrWorker() {
   ocrBusy = true;
   while (ocrQueue.length) {
     const job = ocrQueue.shift();
+    if (job.list) { await readList(job.blob); continue; }
     const s = state.stops.find((x) => x.id === job.id);
     if (!s) continue;
     updateQuickQueue();
@@ -1667,6 +1679,36 @@ async function ocrWorker() {
   ocrBusy = false;
   updateQuickQueue();
   maybeAllDone();
+}
+
+/** Foto einer Adressliste: alle Adressen lesen, nur neue als Stopps anlegen */
+async function readList(blob) {
+  updateQuickQueue();
+  let found = [];
+  try {
+    const { text } = await recognize(blob, () => {}, state.settings.ocr);
+    found = extractAddressList(text);
+  } catch {}
+  const have = new Set(state.stops.map((x) => normKey(x.address)));
+  let added = 0, dup = 0;
+  for (const a of found) {
+    const k = normKey(a.address);
+    if (have.has(k)) { dup++; continue; }
+    have.add(k);
+    const stop = { id: uid(), address: a.address, name: a.name || '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'geo' };
+    state.stops.push(stop); // Reihenfolge der Liste beibehalten
+    placeStop(stop);
+    geoQueue.push(stop.id);
+    added++;
+  }
+  if (added) { invalidateRoute(); save(); renderSoon(); }
+  if (quick) {
+    quick.count += added;
+    $('#quickCount').textContent = String(quick.count);
+    if (!found.length) { beep('dup'); quickFlash('dup', '⚠ ' + t('quick_list_none')); }
+    else { beep(added ? 'ok' : 'dup'); quickFlash(added ? 'ok' : 'dup', t('quick_list_result', { n: added, d: dup })); }
+  }
+  geoWorker();
 }
 
 /** Schnelle Suche: Adressbuch → Photon (Haus mit passender Nummer) → Nominatim */

@@ -24,9 +24,9 @@ test('MaxiCode mit Adresse (Klartext)', () => {
 });
 
 test('MaxiCode ohne lesbare Adresse (komprimiert) → nur PLZ, Service, Sendungsnummer', () => {
-  const data = `[)>${RS}01${GS}9631135${GS}276${GS}054${GS}1Z999AA10123450011${GS}UPSN${GS}999AA1${GS}328${GS}${GS}1/1${GS}1${GS}N${GS}\u0007ÿ#~${GS}${RS}${EOT}`;
+  const data = `[)>${RS}01${GS}9654321${GS}276${GS}054${GS}1Z999AA10123450011${GS}UPSN${GS}999AA1${GS}328${GS}${GS}1/1${GS}1${GS}N${GS}\u0007ÿ#~${GS}${RS}${EOT}`;
   const r = parseScan(data, 'LABEL-TYPE-MAXICODE');
-  assert.equal(r.postcode, '31135');
+  assert.equal(r.postcode, '54321');
   assert.equal(r.service, 'plus');
   assert.equal(r.tracking, '1Z999AA10123450011');
   assert.equal(scanAddress(r), '');
@@ -51,12 +51,12 @@ test('MaxiCode: PLZ mit aufgefüllten Nullen (Mode 2), Österreich 4-stellig', (
 });
 
 test('Echtes UPS-Etikett (Adresse komprimiert): PLZ, Service, vollständige 1Z', () => {
-  const data = '[)>\u001e01\u001d9631135 \u001d276\u001d068\u001d1Z40760412\u001dUPSN\u001d184W5X\u001e07VDOCKO7\u001d&X*H&R,,723( C(#J0(V0#P+B9#/V1-/\'45T\r\u001e\u0004';
+  const data = '[)>\u001e01\u001d9654321 \u001d276\u001d068\u001d1Z12345678\u001dUPSN\u001d999X9X\u001e07XXXXXX7\u001d&X*Y&Z,,000( A(#B0(C0#D+E9#/F1-/\'00G\r\u001e\u0004';
   const r = parseScan(data, 'MaxiCode');
   assert.equal(r.kind, 'maxicode');
-  assert.equal(r.postcode, '31135');
+  assert.equal(r.postcode, '54321');
   assert.equal(r.country, '276');
   assert.equal(r.service, '');
-  assert.equal(r.tracking, '1Z184W5X6840760412');
+  assert.equal(r.tracking, '1Z999X9X6812345678');
   assert.equal(scanAddress(r), '');
 });

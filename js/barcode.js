@@ -66,7 +66,7 @@ export function parseScan(data, type = '') {
     if (plz) out.postcode = plz[0];
     if (/^\d{3}$/.test(f[2] || '')) out.service = SERVICE[f[2]] ?? null;
     // Sendungsnummer: im MaxiCode oft gekürzt ("1Z" + Paketnummer); komplett ist sie
-    // 1Z + Versendernummer (6) + Service (2) + Paketnummer (8) – z. B. 1Z 184W5X 68 40760412
+    // 1Z + Versendernummer (6) + Service (2) + Paketnummer (8) – z. B. 1Z 999X9X 68 12345678
     const t3 = (f[3] || '').toUpperCase();
     if (!out.tracking && /^1Z[0-9A-Z]{16}$/.test(t3)) out.tracking = t3;
     else if (!out.tracking && /^1Z[0-9A-Z]{8}$/.test(t3) && /^[0-9A-Z]{6}$/i.test(f[5] || '') && /^\d{3}$/.test(f[2] || '')) {
