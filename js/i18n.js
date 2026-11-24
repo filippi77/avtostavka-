@@ -171,6 +171,7 @@ const dict = {
     nav_first_n: '{app} übernimmt max. {n} Stopps – die nächsten {n} wurden übergeben',
     help: 'Anleitung',
     help_full: 'Anleitung mit Bildern',
+    nav_copied: 'Adresse kopiert 📋 – falls {app} kein Ziel zeigt: Suche antippen → Einfügen',
     km: 'km', m: 'm', min: 'Min.', h: 'Std.',
   },
   ru: {
@@ -343,6 +344,7 @@ const dict = {
     nav_first_n: '{app} принимает до {n} точек — переданы следующие {n}',
     help: 'Инструкция (нем.)',
     help_full: 'Инструкция с картинками (нем.)',
+    nav_copied: 'Адрес скопирован 📋 — если {app} не показал цель: поиск → «Вставить»',
     km: 'км', m: 'м', min: 'мин', h: 'ч',
   },
 };

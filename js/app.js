@@ -1078,8 +1078,16 @@ const navName = (app) => (app === 'geo' ? t('nav_geo') : app === 'ask' ? t('nav_
 
 function openNavWith(app, points) {
   const { url, count, coordsOnly } = navLink(app, points, { exact: useCoords, address: navAddress });
-  if (points.length > count) toast(count > 1 ? t('nav_first_n', { app: navName(app), n: count }) : t('single_dest', { app: navName(app) }), 4000);
-  else if (coordsOnly && !useCoords(points[0])) toast(t('nav_coords_hint'), 4500);
+  if (coordsOnly) {
+    // Manche Apps (z. B. TomTom AmiGO) übernehmen das Ziel aus dem Link nicht →
+    // Adresse zusätzlich in die Zwischenablage, dann in der App einfach einfügen
+    const text = navAddress(points[0]);
+    window.__lastClip = text; // für automatisierte Tests
+    try { navigator.clipboard?.writeText(text).catch(() => {}); } catch {}
+    toast(t('nav_copied', { app: navName(app) }), 6000);
+  } else if (points.length > count) {
+    toast(count > 1 ? t('nav_first_n', { app: navName(app), n: count }) : t('single_dest', { app: navName(app) }), 4000);
+  }
   window.__lastNav = url; // für automatisierte Tests
   // App-Schemata (tomtomgo:, geo: …) und die Android-App: direkt aufrufen; Webseiten im neuen Tab
   if (IS_NATIVE || isAppScheme(url)) window.location.href = url;
