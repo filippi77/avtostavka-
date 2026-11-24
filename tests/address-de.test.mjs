@@ -200,3 +200,20 @@ LINDENER STRABE 102
   assert.equal(r.name, 'Kauf’S! Getränke GmbH');
   assert.ok(!/to\b/i.test(r.name), r.name);
 });
+
+test('UPS-Service: Express 10:30 / 12:00, Saver „1P“, Plus', async () => {
+  const { detectService, detectDue } = await import('../js/address.js');
+  assert.equal(detectService('UPS EXPRESS 10:30'), 'express');
+  assert.equal(detectDue('UPS EXPRESS 10:30'), '10:30');
+  assert.equal(detectDue('UPS EXPRESS\nDELIVER BY 10.30'), '10:30');
+  assert.equal(detectDue('UPS EXPRESS 12:00'), '12:00');
+  assert.equal(detectDue('UPS EXPRESS'), '12:00');
+  assert.equal(detectService('UPS EXPRESS SAVER\n1P'), 'saver');
+  assert.equal(detectService('DEU 093 9-00\n1P'), 'saver');
+  assert.equal(detectDue('UPS EXPRESS PLUS'), '9:00');
+  assert.equal(detectService('24 KG 1 OF 1'), '');
+  assert.equal(detectService('UPS STANDARD 1 PKG'), '');
+  const r = extractAddress('UPS EXPRESS 10:30\nSHIP TO:\nMax Muster\nHauptstraße 1\n12345 Musterstadt');
+  assert.equal(r.service, 'express');
+  assert.equal(r.due, '10:30');
+});

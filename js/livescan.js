@@ -181,7 +181,8 @@ export function unlockAudio() {
 export function beep(kind = 'ok') {
   try {
     if (!actx) return;
-    const tones = { ok: [[1320, 0.09]], dup: [[660, 0.07], [660, 0.07]], text: [[990, 0.08], [1320, 0.08]] }[kind] || [[1000, 0.1]];
+    // addr: Adresse erkannt – deutlich anders als der kurze Code-Piep
+    const tones = { ok: [[1320, 0.09]], dup: [[660, 0.07], [660, 0.07]], text: [[990, 0.08], [1320, 0.08]], addr: [[880, 0.08], [1175, 0.08], [1760, 0.14]] }[kind] || [[1000, 0.1]];
     let t = actx.currentTime;
     for (const [f, d] of tones) {
       const o = actx.createOscillator();

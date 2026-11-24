@@ -691,3 +691,5 @@ body.searching #btnAllGoogle, body.searching #allDone, body.searching .quick-tou
 .depot-row .btn { justify-self: start; }
 .pin.depot, .pin-depot { background: #351c15; color: #ffb500; }
 .label-body:has(.pkg-no) > .who, .label-body:has(.pkg-no) > .street { padding-right: 74px; }
+#serviceSeg { display: grid; grid-template-columns: repeat(5, 1fr); }
+#serviceSeg button { padding-left: 2px; padding-right: 2px; font-size: 15px; white-space: nowrap; }

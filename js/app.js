@@ -94,7 +94,10 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const isOpen = (s) => s.status === 'pending';
 // Service-Stufen (UPS): kleiner = früher anfahren
 const SERVICES = ['plus', 'express', 'saver'];
-const prioOf = (s) => ({ plus: 1, express: 2, saver: state.settings.saverFirst ? 3 : 9 }[s.service] || 9);
+// Express 10:30 vor Express 12:00
+const prioOf = (s) => ({ plus: 1, express: s.due === '10:30' ? 2 : 2.5, saver: state.settings.saverFirst ? 3 : 9 }[s.service] || 9);
+const svcCode = (s) => (s.service === 'express' ? s.due || '12:00' : SVC_CODE[s.service || '']);
+const svcChip = (s) => t('svc_chip_' + s.service, { time: s.due || '12:00' });
 const isExpress = (s) => SERVICES.includes(s.service);
 const hasPos = (s) => s.lat != null;
 
@@ -239,7 +242,7 @@ function nextCardHtml(s) {
   return `
     <div class="label-strip">
       <span class="label-step"><b>1</b> ${esc(t('next_stop'))}</span>
-      <span class="svc-box svc-${svc || 'std'}">${SVC_CODE[svc]}</span>
+      <span class="svc-box svc-${svc || 'std'}">${svcCode(s)}</span>
     </div>
     <div class="label-body" data-id="${s.id}">
       ${s.no ? `<div class="pkg-no">#${s.no}</div>` : ''}
@@ -247,7 +250,7 @@ function nextCardHtml(s) {
       ${s.name ? `<div class="who">${esc(s.name)}</div>` : ''}
       <div class="street">${esc(street)}</div>
       ${city ? `<div class="city">${esc(city)}</div>` : ''}
-      ${isExpress(s) ? `<div class="svc-line svc-${svc}">${esc(t('svc_chip_' + svc))}</div>` : ''}
+      ${isExpress(s) ? `<div class="svc-line svc-${svc}">${esc(svcChip(s))}</div>` : ''}
       ${chipsHtml(s)}
     </div>
     ${s.tracking ? `<div class="label-track"><div class="barcode" aria-hidden="true"></div><div class="trk">TRACKING #: ${esc(fmtTracking(s.tracking))}</div></div>` : ''}
@@ -299,7 +302,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
       <button class="row-main" data-act="toggle">
         <span class="badge">${badge}</span>
         <span class="row-text">
-          <span class="row-street" style="display:block">${s.no ? `<span class="no-mini">#${s.no}</span>` : ''}${isExpress(s) && isOpen(s) ? `<span class="svc-mini svc-${s.service}">${SVC_CODE[s.service]}</span>` : ''}${esc(street)}</span>
+          <span class="row-street" style="display:block">${s.no ? `<span class="no-mini">#${s.no}</span>` : ''}${isExpress(s) && isOpen(s) ? `<span class="svc-mini svc-${s.service}">${svcCode(s)}</span>` : ''}${esc(street)}</span>
           <span class="row-sub" style="display:block">${hasPos(s) || s.pending || s.review ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}${s.tracking ? ` <span class="trk-mini">…${esc(s.tracking.slice(-4))}</span>` : ''}</span>
         </span>
         ${leg && isOpen(s) ? `<span class="row-eta">${fmtDist(leg.distance)}<br>${fmtTime(leg.duration)}</span>` : ''}
@@ -346,6 +349,7 @@ function handleAction(act, id) {
     case 'fail': setStatus(s, 'failed'); break;
     case 'express':
       s.service = isExpress(s) ? '' : 'express';
+      s.due = s.service === 'express' ? s.due || '12:00' : '';
       s.express = isExpress(s);
       placeStop(s);
       invalidateRoute();
@@ -406,12 +410,16 @@ let scanTracking = '';
 function getService() {
   return $('#serviceSeg .active')?.dataset.v || '';
 }
-function setService(v) {
-  document.querySelectorAll('#serviceSeg button').forEach((b) => b.classList.toggle('active', b.dataset.v === v));
+function getDue() {
+  return $('#serviceSeg .active')?.dataset.due || '';
+}
+function setService(v, due = '') {
+  if (v === 'express' && !due) due = '12:00';
+  document.querySelectorAll('#serviceSeg button').forEach((b) => b.classList.toggle('active', b.dataset.v === v && (b.dataset.due || '') === (v === 'express' ? due : b.dataset.due || '')));
 }
 $('#serviceSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
-  if (b) setService(b.dataset.v);
+  if (b) setService(b.dataset.v, b.dataset.due);
 });
 let candidates = [];
 
@@ -424,7 +432,7 @@ function resetForm() {
   $('#nameInput').value = editing?.name || '';
   $('#phoneInput').value = editing?.phone || '';
   $('#noteInput').value = editing?.note || '';
-  setService(editing?.service || '');
+  setService(editing?.service || '', editing?.due);
   scanTracking = editing?.tracking || '';
   // erkannter Text eines Stopps aus der Schnellerfassung (zum Prüfen)
   $('#rawText').textContent = editing?.ocrText || '';
@@ -472,6 +480,7 @@ $('#btnCamera').addEventListener('click', () => startCamera());
 
 /** Live-Scanner (Android-App) bzw. Foto aufnehmen (Browser). */
 function startCamera() {
+  unlockAudio(); // Signalton nach erkannter Adresse
   if (NativeScanner) nativeScan();
   else $('#fileCamera').click();
 }
@@ -547,8 +556,11 @@ async function processText(text) {
   if (r.name) $('#nameInput').value = r.name;
   if (r.phone) $('#phoneInput').value = r.phone;
   if (r.note) $('#noteInput').value = r.note;
-  setService(r.service || '');
+  setService(r.service || '', r.due);
   scanTracking = r.tracking || '';
+  // Adresse erkannt → Signalton (nach dem Tippen auf die Kamera ist Ton erlaubt)
+  beep(r.confidence === 'low' ? 'text' : 'addr');
+  try { navigator.vibrate?.(60); } catch {}
   if (r.confidence === 'low') $('#rawBox').open = true;
   await findCandidates({ auto: state.settings.autoAdd && r.confidence !== 'low' });
 }
@@ -806,6 +818,7 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
     phone: $('#phoneInput').value.trim(),
     note: $('#noteInput').value.trim(),
     service: getService(),
+    due: getService() === 'express' ? getDue() : getService() === 'plus' ? '9:00' : '',
     express: getService() !== '',
     tracking: scanTracking,
   };
@@ -828,7 +841,7 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
   invalidateRoute();
   save();
   render();
-  if (!wasEdit) toast((isExpress(stop) ? t('svc_chip_' + stop.service) + ' · ' : '') + t('added', { a: splitAddr(address).street }));
+  if (!wasEdit) toast((isExpress(stop) ? svcChip(stop) + ' · ' : '') + t('added', { a: splitAddr(address).street }));
 
   if (next || stayOpen) {
     editing = null;
@@ -1555,6 +1568,7 @@ async function quickAdd(r, getSnapshot) {
     lat: null, lon: null, precision: '',
     status: 'pending',
     service: r.service || '',
+    due: r.service === 'plus' ? '9:00' : r.service === 'express' ? '12:00' : '',
     express: !!r.service,
     tracking: r.tracking || '',
     createdAt: Date.now(),
@@ -1676,8 +1690,9 @@ async function ocrWorker() {
       s.ocrText = String(text || '').trim().slice(0, 600);
       // Ergebnis sofort in der Schnellerfassung zeigen
       if (quick) {
-        if (r.address) quickFlash('ok', `#${s.no} ✓ ` + r.address);
-        else quickFlash('dup', '⚠ ' + t('quick_ocr_fail'));
+        if (r.address) { beep('addr'); quickFlash('ok', `#${s.no} ✓ ` + r.address); }
+        else { beep('dup'); quickFlash('dup', '⚠ ' + t('quick_ocr_fail')); }
+        try { navigator.vibrate?.(r.address ? 60 : [40, 60, 40]); } catch {}
       }
       // gleiches Paket schon vorhanden (Sendungsnummer erst jetzt erkannt)?
       const k = r.address ? normKey(r.address) : '';
@@ -1692,7 +1707,8 @@ async function ocrWorker() {
         s.phone = s.phone || r.phone;
         s.note = s.note || r.note;
         if (!s.tracking && r.tracking) s.tracking = r.tracking;
-        if (!s.service && r.service) { s.service = r.service; s.express = true; placeStop(s); }
+        if (!s.service && r.service) { s.service = r.service; s.due = r.due; s.express = true; placeStop(s); }
+        else if (s.service === 'express' && r.due === '10:30' && s.due !== '10:30') { s.due = '10:30'; placeStop(s); }
         s.pending = 'geo';
         geoQueue.push(s.id);
       } else {

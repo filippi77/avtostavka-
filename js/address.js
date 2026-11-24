@@ -291,10 +291,13 @@ function extractRussian(lines) {
 /* ===================== API ===================== */
 
 // Express-/Prioritätssendungen (DHL Express, GLS Express, DPD Express 10:00/12:00, UPS Express Saver …)
-const EXPRESS_RE = /(^|[^\p{L}])(express|expr\.|expresszustellung|priority|priorit[äa]t|prio|same[\s-]?day|sameday|overnight|next[\s-]?flight|time\s?definite|vor\s*(?:8|9|10|11|12)(?::00)?\s*uhr|bis\s*(?:8|9|10|11|12)(?::00)?\s*uhr|(?:8|9|10|12):00\s*(?:uhr|express)|экспресс|срочн)(?![\p{L}])/iu;
+const EXPRESS_RE = /(^|[^\p{L}])(express|10[:.]30\s*(?:uhr|express)?|expr\.|expresszustellung|priority|priorit[äa]t|prio|same[\s-]?day|sameday|overnight|next[\s-]?flight|time\s?definite|vor\s*(?:8|9|10|11|12)(?::00)?\s*uhr|bis\s*(?:8|9|10|11|12)(?::00)?\s*uhr|(?:8|9|10|12):00\s*(?:uhr|express)|экспресс|срочн)(?![\p{L}])/iu;
 
 const PLUS_RE = /(^|[^\p{L}])(express\s*plus|exp\.?\s*plus|(?:vor|bis)\s*(?:8|9)(?:[:.]\d\d)?\s*uhr|(?:8|9)[:.](?:00|30)\s*(?:uhr|express|am)?(?![\d]))/iu;
-const SAVER_RE = /(^|[^\p{L}])(express\s*saver|ups\s*saver|saver)(?![\p{L}])/iu;
+// "1P" steht auf UPS-Saver-Etiketten im Service-Kasten oben rechts
+const SAVER_RE = /(^|[^\p{L}\d])(express\s*saver|ups\s*saver|saver|1\s?P)(?![\p{L}\d])/iu;
+// Zustellzeit bei Express: 10:30 oder 12:00 (steht auf dem Etikett)
+const DUE_1030_RE = /(^|[^\d])10\s?[:.]\s?30(?!\d)/;
 const TRACKING_RE = /(?:^|[^0-9A-Z])(1Z\s?(?:[0-9A-Z]\s?){16})(?![0-9A-Z])/i;
 
 /**
@@ -307,6 +310,13 @@ export function detectService(text) {
   if (PLUS_RE.test(t)) return 'plus';
   if (SAVER_RE.test(t)) return 'saver';
   if (EXPRESS_RE.test(t)) return 'express';
+  return '';
+}
+
+/** Zustellzeit: Plus → 9:00, Express → 10:30 oder 12:00, sonst '' */
+export function detectDue(text, service = detectService(text)) {
+  if (service === 'plus') return '9:00';
+  if (service === 'express') return DUE_1030_RE.test(String(text || '')) ? '10:30' : '12:00';
   return '';
 }
 
@@ -324,7 +334,7 @@ export function extractTracking(text) {
 /** Liefert { address, name, phone, note, confidence, service, express, tracking } aus dem OCR-Text. */
 export function extractAddress(text) {
   const service = detectService(text);
-  return { ...extractAddressInner(text), service, express: service !== '', tracking: extractTracking(text) };
+  return { ...extractAddressInner(text), service, due: detectDue(text, service), express: service !== '', tracking: extractTracking(text) };
 }
 
 function extractAddressInner(text) {
