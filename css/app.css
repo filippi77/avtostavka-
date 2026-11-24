@@ -633,3 +633,8 @@ dialog.quick::backdrop { background: #000; }
 .quick.mode-text #btnQuickPhoto { background: var(--gold); color: #351c15; font-size: 18px; font-weight: 800; }
 .quick.mode-text #btnQuickFinish { background: rgba(255,255,255,.15); color: #fff; }
 .quick.mode-text .q-frame { top: 40%; width: min(88vw, 420px); aspect-ratio: 16 / 10; border-radius: 14px; }
+
+.q-last-row { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 1.3em; }
+.q-thumb { width: 92px; max-height: 64px; object-fit: contain; border-radius: 8px; border: 2px solid rgba(255,255,255,.6); background: #fff; flex: none; }
+.q-last-row .q-last { flex: 1; }
+.q-thumb[hidden] + .q-last { text-align: center; }

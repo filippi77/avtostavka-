@@ -393,8 +393,10 @@ function resetForm() {
   $('#noteInput').value = editing?.note || '';
   setService(editing?.service || '');
   scanTracking = editing?.tracking || '';
-  $('#rawBox').hidden = true;
-  $('#rawBox').open = false;
+  // erkannter Text eines Stopps aus der Schnellerfassung (zum Prüfen)
+  $('#rawText').textContent = editing?.ocrText || '';
+  $('#rawBox').hidden = !editing?.ocrText;
+  $('#rawBox').open = !!editing?.review && !!editing?.ocrText;
   $('#rawText').textContent = '';
   const prev = $('#scanPreview');
   if (prev.src) URL.revokeObjectURL(prev.src);
@@ -1521,6 +1523,12 @@ async function quickPhoto() {
   quick.lastShot = now;
   const blob = await quick.scanner.snapshot(quickMode() === 'text' ? $('#dlgQuick .q-frame') : null);
   if (!blob) return;
+  // Vorschau: so sieht man sofort, was aufgenommen wurde
+  const th = $('#quickThumb');
+  if (th.dataset.url) URL.revokeObjectURL(th.dataset.url);
+  th.dataset.url = URL.createObjectURL(blob);
+  th.src = th.dataset.url;
+  th.hidden = false;
   const stop = { id: uid(), address: '⏳', name: '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'ocr' };
   placeStop(stop);
   save();
@@ -1556,6 +1564,12 @@ async function ocrWorker() {
     try {
       const { text } = await recognize(job.blob, () => {}, state.settings.ocr);
       const r = extractAddress(text);
+      s.ocrText = String(text || '').trim().slice(0, 600);
+      // Ergebnis sofort in der Schnellerfassung zeigen
+      if (quick) {
+        if (r.address) quickFlash('ok', '✓ ' + r.address);
+        else quickFlash('dup', '⚠ ' + t('quick_ocr_fail'));
+      }
       // gleiches Paket schon vorhanden (Sendungsnummer erst jetzt erkannt)?
       const k = r.address ? normKey(r.address) : '';
       if (r.tracking && !s.tracking && state.stops.some((x) => x !== s && x.tracking === r.tracking)) {
