@@ -82,6 +82,24 @@ export function navLink(app, points, { exact = () => true, address = (s) => s.ad
   return { url, count: list.length, coordsOnly: !cfg.text };
 }
 
+/**
+ * iPhone (Web-App vom Home-Bildschirm): https-Links von Google Maps/Waze öffnen dort nur ein leeres
+ * Browserfenster statt der App. Deshalb direkt das App-Schema verwenden (Rückfall: Webseite).
+ * Liefert die App-Adresse oder null.
+ */
+export function iosAppLink(app, points, { exact = () => true, address = (s) => s.address } = {}) {
+  const cfg = NAV_APPS[app];
+  if (!cfg || !points.length) return null;
+  const list = points.slice(0, cfg.multi);
+  const dest = (s) => (cfg.text && !exact(s) ? enc(address(s)) : `${s.lat},${s.lon}`);
+  if (app === 'google') return `comgooglemaps://?daddr=${list.map(dest).join('+to:')}&directionsmode=driving`;
+  if (app === 'waze') {
+    const f = list[0];
+    return cfg.text && !exact(f) ? `waze://?q=${enc(address(f))}&navigate=yes` : `waze://?ll=${f.lat},${f.lon}&navigate=yes`;
+  }
+  return null;
+}
+
 /** true für App-Schemata (yandexnavi:, geo: …), die nicht per window.open geöffnet werden dürfen. */
 export function isAppScheme(url) {
   return !/^https?:/i.test(url);

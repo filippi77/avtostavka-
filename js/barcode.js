@@ -22,6 +22,7 @@ const SERVICE = {
   '065': 'saver', // UPS Saver
   '013': 'saver', // Next Day Air Saver
   '011': '', // UPS Standard
+  '068': '', // UPS Standard (Inland Deutschland, auf echten Etiketten gesehen)
   '008': '', // Expedited
   '003': '', // Ground
 };
@@ -64,7 +65,13 @@ export function parseScan(data, type = '') {
     const plz = (f[0] || '').match(out.country === '040' || out.country === '756' ? /^\d{4}/ : /^\d{5}/);
     if (plz) out.postcode = plz[0];
     if (/^\d{3}$/.test(f[2] || '')) out.service = SERVICE[f[2]] ?? null;
-    if (!out.tracking && /^1Z/i.test(f[3] || '')) out.tracking = f[3].toUpperCase();
+    // Sendungsnummer: im MaxiCode oft gekürzt ("1Z" + Paketnummer); komplett ist sie
+    // 1Z + Versendernummer (6) + Service (2) + Paketnummer (8) – z. B. 1Z 999X9X 68 12345678
+    const t3 = (f[3] || '').toUpperCase();
+    if (!out.tracking && /^1Z[0-9A-Z]{16}$/.test(t3)) out.tracking = t3;
+    else if (!out.tracking && /^1Z[0-9A-Z]{8}$/.test(t3) && /^[0-9A-Z]{6}$/i.test(f[5] || '') && /^\d{3}$/.test(f[2] || '')) {
+      out.tracking = '1Z' + f[5].toUpperCase() + f[2].slice(1) + t3.slice(2);
+    }
     // Straße/Ort nur übernehmen, wenn sie wie Klartext aussehen (keine komprimierten Daten)
     const plain = (s) => s && s.length >= 2 && s.length <= 60 && /^[\p{L}\d .,'\-/]+$/u.test(s) && /\p{L}{2}/u.test(s);
     if (plain(f[11]) && plain(f[12])) {

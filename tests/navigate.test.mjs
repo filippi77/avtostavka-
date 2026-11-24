@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { navLink, appsFor, platformOf, defaultApp, isAppScheme } from '../js/navigate.js';
+import { navLink, appsFor, platformOf, defaultApp, isAppScheme, iosAppLink } from '../js/navigate.js';
 
 const A = { lat: 51.1902, lon: 6.4401, address: 'Daimlerring 2, 41065 Mönchengladbach' };
 const B = { lat: 52.5291, lon: 13.4015, address: 'Torstraße 101, 10119 Berlin' };
@@ -49,3 +49,13 @@ test('Android-Auswahl (geo:)', () => {
   assert.equal(isAppScheme('https://maps.apple.com/'), false);
 });
 
+
+test('iPhone: Google Maps / Waze als App-Schema', () => {
+  const a = { lat: 52.5, lon: 13.4, address: 'Torstraße 101, 10119 Berlin' };
+  const b = { lat: 52.6, lon: 13.5, address: 'Invalidenstraße 50, 10557 Berlin' };
+  assert.equal(iosAppLink('google', [a]), 'comgooglemaps://?daddr=52.5,13.4&directionsmode=driving');
+  assert.equal(iosAppLink('google', [a, b]), 'comgooglemaps://?daddr=52.5,13.4+to:52.6,13.5&directionsmode=driving');
+  assert.equal(iosAppLink('google', [a], { exact: () => false }), 'comgooglemaps://?daddr=Torstra%C3%9Fe%20101%2C%2010119%20Berlin&directionsmode=driving');
+  assert.equal(iosAppLink('waze', [a]), 'waze://?ll=52.5,13.4&navigate=yes');
+  assert.equal(iosAppLink('apple', [a]), null);
+});

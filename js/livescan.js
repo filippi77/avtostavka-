@@ -40,6 +40,7 @@ export class LiveScanner {
     this.running = false;
     this.stream = null;
     this.busy = false;
+    this.codes = true; // false = nur Adresse: keine Codes suchen, nur Fotos für die Texterkennung
   }
 
   async start() {
@@ -47,7 +48,11 @@ export class LiveScanner {
     this.Z = Z;
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      // Auflösung passend zur Haltung des Handys anfragen (hochkant → 1080×1920), sonst wird das Bild
+      // beschnitten oder verzerrt – die Ringe des MaxiCodes müssen rund bleiben
+      video: window.innerHeight > window.innerWidth
+        ? { facingMode: { ideal: 'environment' }, width: { ideal: 1080 }, height: { ideal: 1920 } }
+        : { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
     });
     this.video.srcObject = this.stream;
     this.video.setAttribute('playsinline', ''); // iPhone: nicht im Vollbild-Player öffnen
@@ -77,9 +82,10 @@ export class LiveScanner {
    * Ein gerade gelesener MaxiCode wird weiß abgedeckt – seine Punkte würden sonst als
    * Buchstabensalat an den Adresszeilen hängen.
    */
-  snapshot() {
+  snapshot(cropEl = null) {
     const v = this.video;
     if (!v.videoWidth) return Promise.resolve(null);
+    if (cropEl) return this.snapshotCrop(cropEl);
     const c = document.createElement('canvas');
     c.width = v.videoWidth;
     c.height = v.videoHeight;
@@ -98,6 +104,29 @@ export class LiveScanner {
     return new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
   }
 
+  /**
+   * Nur den Bereich unter dem Rahmen `el` ausschneiden (Video füllt den Bildschirm mit object-fit: cover).
+   * Kleineres Bild → Texterkennung schneller und ohne Störungen vom Rest des Etiketts.
+   */
+  snapshotCrop(el) {
+    const v = this.video;
+    const vr = v.getBoundingClientRect(), fr = el.getBoundingClientRect();
+    const s = Math.max(vr.width / v.videoWidth, vr.height / v.videoHeight);
+    const ox = (vr.width - v.videoWidth * s) / 2, oy = (vr.height - v.videoHeight * s) / 2;
+    const pad = 0.08; // etwas Rand dazu
+    let x0 = (fr.left - vr.left - ox - fr.width * pad) / s, y0 = (fr.top - vr.top - oy - fr.height * pad) / s;
+    let x1 = (fr.right - vr.left - ox + fr.width * pad) / s, y1 = (fr.bottom - vr.top - oy + fr.height * pad) / s;
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+    x1 = Math.min(v.videoWidth, x1); y1 = Math.min(v.videoHeight, y1);
+    const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+    if (w < 50 || h < 50) return this.snapshot();
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    c.getContext('2d').drawImage(v, x0, y0, w, h, 0, 0, w, h);
+    return new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
+  }
+
   async loop() {
     while (this.running) {
       const t0 = performance.now();
@@ -110,11 +139,11 @@ export class LiveScanner {
 
   async scanFrame() {
     const v = this.video;
-    if (!v.videoWidth || this.busy) return;
+    if (!v.videoWidth || this.busy || !this.codes) return;
     this.busy = true;
     try {
-      // auf max. 1280 px verkleinern – schneller, MaxiCode bleibt gut lesbar
-      const scale = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+      // volle Auflösung bis 1920 px: bei 1280 px werden die MaxiCode-Punkte echter Etiketten zu klein
+      const scale = Math.min(1, 1920 / Math.max(v.videoWidth, v.videoHeight));
       const w = Math.round(v.videoWidth * scale);
       const h = Math.round(v.videoHeight * scale);
       if (this.canvas.width !== w) { this.canvas.width = w; this.canvas.height = h; }

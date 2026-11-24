@@ -1,11 +1,12 @@
 import { extractAddress, smartCase } from './address.js';
+import { extractAddressList } from './addrlist.js';
 import { parseScan, scanAddress } from './barcode.js';
 import { geocode, reverse } from './geocode.js';
 import { suggest } from './autocomplete.js';
 import { normKey, remember, updatePosition, lookup, searchBook, frequent, pruneBook, autosaveTour, saveNamedTour, restoreStops, today } from './memory.js';
 import { buildRoute, haversine } from './route.js';
 import { DwellTracker, pruneVisits, visitsCsv } from './visits.js';
-import { NAV_APPS, navLink, appsFor, platformOf, defaultApp, isAppScheme } from './navigate.js';
+import { NAV_APPS, navLink, appsFor, platformOf, defaultApp, isAppScheme, iosAppLink } from './navigate.js';
 import { recognize, warmUp } from './ocr.js';
 import { LiveScanner, unlockAudio, beep, loadZXing } from './livescan.js';
 import { suggest as suggestFast } from './autocomplete.js';
@@ -25,6 +26,11 @@ const NativeScanner = (() => {
   if (!IS_NATIVE) return null;
   try { return window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin('LabelScanner') : window.Capacitor.Plugins?.LabelScanner; } catch { return null; }
 })();
+// Mini-Fenster über der Navi-App (Android-App)
+const NavOverlay = (() => {
+  if (!IS_NATIVE) return null;
+  try { return window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin('NavOverlay') : window.Capacitor.Plugins?.NavOverlay; } catch { return null; }
+})();
 // Hardware-Scanner (Zebra DataWedge) in der Android-App
 const Zebra = (() => {
   if (!IS_NATIVE) return null;
@@ -37,6 +43,7 @@ const defaults = {
   hideInstallHint: false,
   book: {}, // Adressbuch: häufige Adressen
   tours: [], // gespeicherte Touren
+  tourDate: null, // Datum der aktuellen Tour (JJJJ-MM-TT)
   visits: [], // Aufenthalte an Adressen + Zustell-Ereignisse
   settings: {
     lang: 'de',
@@ -48,6 +55,7 @@ const defaults = {
     nav: defaultApp(PLATFORM),
     autoAdd: false,
     saverFirst: true,
+    miniWindow: true, // Android-App: Mini-Fenster mit dem aktuellen Stopp beim Navigieren
     radius: 50,
     trackVisits: true,
     dwellSec: 30,
@@ -67,11 +75,17 @@ function load() {
   s.visits = pruneVisits(s.visits || []);
   s.book = s.book || {};
   if (!Object.keys(s.book).length) for (const st of s.stops) remember(s.book, st);
+  // Datum der aktuellen Tour (ältere Versionen: aus dem Erfassungszeitpunkt der Stopps)
+  if (!s.tourDate) {
+    const last = Math.max(0, ...s.stops.map((x) => x.createdAt || 0));
+    s.tourDate = last ? today(new Date(last)) : today();
+  }
+  if (!s.stops.length && s.tourDate < today()) s.tourDate = today();
   return s;
 }
 function save() {
   // Tour des Tages automatisch mitschreiben
-  state.tours = autosaveTour(state.tours || [], state.stops);
+  state.tours = autosaveTour(state.tours || [], state.stops, { date: state.tourDate || today() });
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -129,7 +143,11 @@ function showView(v) {
     if (map) setTimeout(() => { map.invalidateSize(); renderMap(); }, 0);
   }
 }
-document.querySelectorAll('.tab[data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+document.querySelectorAll('.tab[data-view]').forEach((b) => b.addEventListener('click', () => {
+  // nochmal auf „Tour“ tippen → nach oben
+  if (b.dataset.view === currentView) window.scrollTo({ top: 0, behavior: 'smooth' });
+  showView(b.dataset.view);
+}));
 
 /* ---------------- Tour-Liste ---------------- */
 
@@ -148,6 +166,14 @@ function render() {
   $('#emptyList').hidden = total > 0;
   $('#btnManual').hidden = total === 0;
   $('#installHint').hidden = !(IS_IOS && !IS_STANDALONE && !state.hideInstallHint);
+  // Datum der Tour; alte Tour mit offenen Stopps deutlich markieren
+  const old = state.tourDate < today() && pending.length > 0;
+  $('#tourDateLabel').textContent = t('tour_of', { d: fmtTourDate(state.tourDate) });
+  $('#tourOld').hidden = !old;
+  $('#tourBar').classList.toggle('old', old);
+  syncMiniSoon();
+  if (!$('#returnBar').hidden && !navReturnStop()) $('#returnBar').hidden = true;
+  $('#btnNewTour').classList.toggle('primary', old);
 
   // Nächster Stopp
   const next = pending[0];
@@ -166,6 +192,11 @@ function render() {
 
   // Erledigt
   $('#doneWrap').hidden = done.length === 0;
+  // alles erledigt: deutlich sagen und die erledigten Stopps zeigen
+  const allDone = total > 0 && pending.length === 0;
+  if (allDone && $('#allDone').hidden) $('#doneWrap').open = true;
+  $('#allDone').hidden = !allDone;
+  $('#allDoneText').textContent = t('all_done_text', { n: done.filter((s) => s.status === 'delivered').length, f: done.filter((s) => s.status === 'failed').length });
   $('#doneCount').textContent = done.length;
   $('#doneList').innerHTML = done.map((s) => rowHtml(s, null)).join('');
 
@@ -219,6 +250,7 @@ function nextCardHtml(s) {
       <button class="btn plain" data-act="show" ${hasPos(s) ? '' : 'disabled'}>${ICON.pin}<span>${t('show_on_map')}</span></button>
       <button class="btn plain ${isExpress(s) ? 'on' : ''}" data-act="express">${ICON.bolt}<span>Express</span></button>
       <button class="btn plain" data-act="edit">${ICON.edit}<span>${t('edit')}</span></button>
+      <button class="btn plain danger" data-act="del">${ICON.del}<span>${t('delete')}</span></button>
     </div>`;
 }
 
@@ -373,8 +405,10 @@ function resetForm() {
   $('#noteInput').value = editing?.note || '';
   setService(editing?.service || '');
   scanTracking = editing?.tracking || '';
-  $('#rawBox').hidden = true;
-  $('#rawBox').open = false;
+  // erkannter Text eines Stopps aus der Schnellerfassung (zum Prüfen)
+  $('#rawText').textContent = editing?.ocrText || '';
+  $('#rawBox').hidden = !editing?.ocrText;
+  $('#rawBox').open = !!editing?.review && !!editing?.ocrText;
   $('#rawText').textContent = '';
   const prev = $('#scanPreview');
   if (prev.src) URL.revokeObjectURL(prev.src);
@@ -1138,14 +1172,73 @@ function navAddress(s) {
 const navName = (app) => (app === 'geo' ? t('nav_geo') : app === 'ask' ? t('nav_ask') : NAV_APPS[app]?.name || app);
 
 function openNavWith(app, points) {
+  if (NavOverlay && state.settings.miniWindow) return startMiniWindow(app, points);
+  openNavDirect(app, points);
+}
+function openNavDirect(app, points) {
   const { url, count, coordsOnly } = navLink(app, points, { exact: useCoords, address: navAddress });
   if (points.length > count) toast(count > 1 ? t('nav_first_n', { app: navName(app), n: count }) : t('single_dest', { app: navName(app) }), 4000);
   else if (coordsOnly && !useCoords(points[0])) toast(t('nav_coords_hint'), 4500);
   window.__lastNav = url; // für automatisierte Tests
+  // merken, wohin navigiert wird – bei der Rückkehr in die App: „Zugestellt → nächster Stopp“
+  state.navTo = { id: points[0].id, app, at: Date.now(), multi: points.length > 1 };
+  save();
+  // iPhone: Google Maps / Waze direkt als App öffnen; ist die App nicht da, nach kurzer Zeit die Webseite
+  const appUrl = PLATFORM === 'ios' && !IS_NATIVE && points.length === 1 ? iosAppLink(app, points, { exact: useCoords, address: navAddress }) : null;
+  if (appUrl) {
+    window.__lastNav = appUrl;
+    window.location.href = appUrl;
+    setTimeout(() => { if (document.visibilityState === 'visible') window.open(url, '_blank'); }, 1500);
+    return;
+  }
   // App-Schemata (yandexnavi:, geo: …) und die Android-App: direkt aufrufen; Webseiten im neuen Tab
   if (IS_NATIVE || isAppScheme(url)) window.location.href = url;
   else window.open(url, '_blank');
 }
+
+/* ---------- Rückkehr vom Navi: ein Tipp für „Zugestellt“ und weiter zum nächsten Stopp ---------- */
+let leftForNav = false;
+function navReturnStop() {
+  const n = state.navTo;
+  if (!n || Date.now() - n.at > 4 * 3600e3) return null;
+  const s = state.stops.find((x) => x.id === n.id);
+  return s && isOpen(s) ? s : null;
+}
+function showReturnBar() {
+  const s = navReturnStop();
+  $('#returnBar').hidden = !s;
+  if (!s) return;
+  $('#returnAddr').textContent = splitAddr(s.address).street;
+  const next = state.stops.find((x) => isOpen(x) && x !== s && (hasPos(x) || NAV_APPS[state.navTo.app]?.text));
+  $('#btnReturnDone').querySelector('span').textContent = next ? t('ret_done_next') : t('delivered');
+  $('#btnReturnFail').querySelector('span').textContent = next ? t('ret_fail_next') : t('not_home_short');
+}
+function hideReturnBar() {
+  state.navTo = null;
+  save();
+  $('#returnBar').hidden = true;
+}
+function returnAct(status) {
+  const s = navReturnStop();
+  const app = state.navTo?.app || state.settings.nav;
+  const multi = state.navTo?.multi;
+  hideReturnBar();
+  if (!s) return;
+  setStatus(s, status);
+  save();
+  render();
+  const rest = state.stops.filter((x) => isOpen(x) && (hasPos(x) || NAV_APPS[app]?.text));
+  if (!rest.length) return toast(t('quick_done'));
+  try { navigator.vibrate?.(40); } catch {}
+  openNavWith(app === 'ask' ? state.settings.nav : app, multi ? rest : [rest[0]]);
+}
+$('#btnReturnDone').addEventListener('click', () => returnAct('delivered'));
+$('#btnReturnFail').addEventListener('click', () => returnAct('failed'));
+$('#btnReturnClose').addEventListener('click', hideReturnBar);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (state.navTo && Date.now() - state.navTo.at < 5000) leftForNav = true; }
+  else if (leftForNav) { leftForNav = false; showReturnBar(); }
+});
 
 let navPending = [];
 function openNav(points) {
@@ -1175,6 +1268,115 @@ $('#btnOpenNav').addEventListener('click', () => {
   openNav(state.stops.filter((s) => isOpen(s) && hasPos(s)));
 });
 
+/* ---------------- Mini-Fenster beim Navigieren (Android-App) ----------------
+ * Über Google Maps & Co. schwebt ein kleines Fenster mit dem aktuellen Stopp.
+ * "Zugestellt" / "Nicht da" → nächster Stopp, die Navigation dorthin startet sofort.
+ * Die Erledigungen holt die App ab, sobald sie wieder läuft (oder sofort, wenn sie im Hintergrund wach ist).
+ */
+let miniActive = false;
+let miniTimer = null;
+const MINI_BADGE = { plus: 'PLUS 9:00', express: 'EXPRESS 12:00', saver: 'SAVER' };
+const miniCanNav = (s, app) => hasPos(s) || !!NAV_APPS[app]?.text;
+
+/** ein Stopp fürs Mini-Fenster; route: bei Google mit mehreren Zielen die nächsten Stopps ab hier */
+function miniStop(s, app, route) {
+  const { street, city } = splitAddr(s.address);
+  const opt = { exact: useCoords, address: navAddress };
+  let url;
+  if (route) url = navLink('google', route, opt).url;
+  else if (app === 'google') url = 'google.navigation:q=' + (useCoords(s) ? `${s.lat},${s.lon}` : encodeURIComponent(navAddress(s)));
+  else url = navLink(NAV_APPS[app] ? app : 'google', [s], opt).url;
+  return { id: s.id, title: street, sub: city, name: s.name || '', badge: MINI_BADGE[s.service] || '', url, web: navLink('google', [s], opt).url };
+}
+function miniList(order, app, multi) {
+  const list = order.filter((s) => miniCanNav(s, app));
+  return list.map((s, i) => miniStop(s, app, multi ? list.slice(i, i + 10) : null));
+}
+function miniLabels() {
+  return {
+    done: t('mini_done'), fail: t('mini_fail'), nav: t('mini_nav'), app: t('mini_app'), end: t('mini_end'),
+    step: t('mini_step', { i: '{i}', n: '{n}' }), left: t('mini_left', { n: '{n}' }),
+    all_done: t('mini_all_done'), all_done_head: t('mini_all_done_head'), channel: t('mini_channel'),
+  };
+}
+
+async function startMiniWindow(app, points) {
+  try {
+    await applyMiniEvents();
+    const st = await NavOverlay.status();
+    if (!st.overlay) {
+      if (!state.overlayAsked) {
+        state.overlayAsked = true;
+        save();
+        if (confirm(t('mini_perm'))) {
+          await NavOverlay.requestOverlay();
+          return toast(t('mini_perm_back'), 6000);
+        }
+      }
+      // ohne Fenster-Erlaubnis: dieselben Knöpfe in der Benachrichtigung
+      if (!st.notifications) await NavOverlay.requestNotifications();
+    }
+    const multi = points.length > 1 && (NAV_APPS[app]?.multi || 1) > 1;
+    const first = points[0];
+    const order = [first, ...state.stops.filter((s) => isOpen(s) && s !== first)];
+    state.mini = { app, multi };
+    save();
+    await NavOverlay.start({ stops: miniList(order, app, multi), labels: miniLabels(), launch: true });
+    miniActive = true;
+  } catch (e) {
+    console.error(e);
+    openNavDirect(app, points);
+  }
+}
+
+/** Erledigungen aus dem Mini-Fenster übernehmen */
+async function applyMiniEvents() {
+  if (!NavOverlay) return 0;
+  let n = 0;
+  try {
+    const r = await NavOverlay.takeEvents();
+    for (const e of r?.events || []) {
+      const s = state.stops.find((x) => x.id === e.id);
+      if (!s) continue;
+      if (e.status === 'pending') {
+        if (!isOpen(s)) { setStatus(s, 'pending'); n++; }
+      } else if (s.status !== e.status) {
+        setStatus(s, e.status);
+        if (e.at) s.doneAt = e.at;
+        n++;
+      }
+    }
+  } catch {}
+  if (n) { save(); render(); }
+  return n;
+}
+
+/** Änderungen in der App (Reihenfolge, neue/erledigte Stopps) ans Mini-Fenster weitergeben */
+function syncMiniSoon() {
+  if (!miniActive) return;
+  clearTimeout(miniTimer);
+  miniTimer = setTimeout(syncMini, 400);
+}
+async function syncMini() {
+  try {
+    const st = await NavOverlay.status();
+    if (!st.running) { miniActive = false; return; }
+    await applyMiniEvents();
+    const { app, multi } = state.mini || { app: 'google', multi: false };
+    await NavOverlay.update({ stops: miniList(state.stops.filter(isOpen), app, multi) });
+  } catch {}
+}
+function miniEnd() {
+  miniActive = false;
+  NavOverlay?.stop().catch(() => {});
+}
+if (NavOverlay) {
+  NavOverlay.addListener('change', () => applyMiniEvents());
+  NavOverlay.status().then((st) => { miniActive = !!st.running; }).catch(() => {});
+  applyMiniEvents();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') applyMiniEvents(); });
+}
+
 /* ---------------- Einstellungen: Navi-Auswahl je nach Gerät ---------------- */
 function fillNavSelect() {
   $('#setNav').innerHTML = NAV_CHOICES.map((a) => `<option value="${a}">${esc(navName(a))}</option>`).join('');
@@ -1183,6 +1385,57 @@ function fillNavSelect() {
 /* ---------------- Touren & Gedächtnis ---------------- */
 
 const dlgT = $('#dlgTours');
+
+/** "Heute, 24.11." / "Gestern, 23.11." / "Fr., 20.11." */
+function fmtTourDate(date) {
+  const d = new Date((date || today()) + 'T12:00:00');
+  const diff = Math.round((new Date(today() + 'T12:00:00') - d) / 86400000);
+  const dm = d.toLocaleDateString(getLang(), { day: '2-digit', month: '2-digit' });
+  const rel = { 0: t('today'), 1: t('yesterday'), '-1': t('tomorrow') }[diff];
+  return rel ? `${rel}, ${dm}` : d.toLocaleDateString(getLang(), { weekday: 'short', day: '2-digit', month: '2-digit' });
+}
+
+/* ---------------- Neue Tour ---------------- */
+
+const dlgNT = $('#dlgNewTour');
+const savedTourFor = (d) => d !== state.tourDate && (state.tours || []).find((x) => x.auto && x.date === d && x.stops?.length);
+
+function openNewTour() {
+  if (dlgT.open) dlgT.close();
+  $('#newTourDate').value = today();
+  updateNewTourInfo();
+  dlgNT.showModal();
+}
+function updateNewTourInfo() {
+  const d = $('#newTourDate').value || today();
+  const lines = [];
+  if (state.stops.length && d !== state.tourDate) lines.push(t('new_tour_keep', { n: state.stops.length, d: fmtTourDate(state.tourDate) }));
+  const ex = savedTourFor(d);
+  if (ex) lines.push(t('new_tour_exists', { n: ex.stops.length }));
+  $('#newTourInfo').textContent = lines.join(' ');
+}
+function startNewTour(scan) {
+  const d = $('#newTourDate').value || today();
+  if (d === state.tourDate && state.stops.length && !confirm(t('new_tour_same', { n: state.stops.length }))) return;
+  save(); // bisherige Tour unter ihrem Datum sichern
+  const ex = savedTourFor(d);
+  // schon gespeicherte Tour für dieses Datum fortsetzen (Status bleibt erhalten)
+  state.stops = ex ? ex.stops.map((s) => ({ ...s, id: uid(), status: s.status || 'pending', createdAt: Date.now() })) : [];
+  state.route = null;
+  state.tourDate = d;
+  miniEnd();
+  save();
+  render();
+  dlgNT.close();
+  showView('list');
+  toast(t('new_tour_started', { d: fmtTourDate(d) }));
+  if (scan) openQuick();
+}
+for (const id of ['#btnNewTour', '#btnNewTour2', '#btnAllDoneNew']) $(id).addEventListener('click', openNewTour);
+$('#newTourDate').addEventListener('input', updateNewTourInfo);
+$('#btnNewTourOk').addEventListener('click', () => startNewTour(false));
+$('#btnNewTourScan').addEventListener('click', () => startNewTour(true));
+dlgNT.addEventListener('click', (e) => { if (e.target === dlgNT) dlgNT.close(); });
 
 function tourTitle(tr) {
   if (!tr.auto) return tr.name;
@@ -1208,6 +1461,7 @@ const renderSoon = () => { clearTimeout(renderTimer); renderTimer = setTimeout(r
 async function openQuick() {
   unlockAudio();
   quick = { scanner: null, lastKey: '', lastAt: 0, count: 0 };
+  setQuickMode(state.settings.quickMode || 'code');
   $('#quickCount').textContent = '0';
   $('#quickLast').textContent = '';
   $('#quickStatus').textContent = t('quick_starting');
@@ -1216,10 +1470,11 @@ async function openQuick() {
   if (!myPos) locate(); // für die Adresssuche in der Nähe
   const sc = new LiveScanner($('#quickVideo'), onQuickCode);
   quick.scanner = sc;
+  sc.codes = quickMode() === 'code';
   try {
     await sc.start();
     if (!quick) return sc.stop();
-    $('#quickStatus').textContent = t('quick_ready');
+    $('#quickStatus').textContent = t(QUICK_HINT[quickMode()]);
   } catch (err) {
     console.error(err);
     $('#quickStatus').textContent = err?.message === 'ZXing' ? t('quick_lib_error') : t('quick_cam_error');
@@ -1303,11 +1558,54 @@ async function quickAdd(r, getSnapshot) {
   pumpQueues();
 }
 
-/** Foto-Taste in der Schnellerfassung: Etikett ohne lesbaren Code → nur Text erkennen */
+/**
+ * Zwei Arten der Schnellerfassung:
+ *  - 'code': MaxiCode/Strichcode live lesen (Sendungsnummer, Service), Adresse per Texterkennung im Hintergrund
+ *  - 'text': nur Adresse – auslösen per Taste oder Tippen aufs Bild, nur der Rahmen wird gelesen
+ */
+const quickMode = () => (['text', 'list'].includes(state.settings.quickMode) ? state.settings.quickMode : 'code');
+const QUICK_HINT = { code: 'quick_ready', text: 'quick_text_hint', list: 'quick_list_hint' };
+function setQuickMode(m) {
+  state.settings.quickMode = m;
+  save();
+  $('#dlgQuick').classList.toggle('mode-text', m === 'text');
+  $('#dlgQuick').classList.toggle('mode-list', m === 'list');
+  for (const b of document.querySelectorAll('#quickModeSeg button')) b.classList.toggle('active', b.dataset.mode === m);
+  if (quick?.scanner) {
+    quick.scanner.codes = m === 'code';
+    if (m !== 'code') quick.scanner.lastSymbol = null;
+  }
+  if (quick) $('#quickStatus').textContent = t(QUICK_HINT[m]);
+}
+$('#quickModeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mode]');
+  if (b) setQuickMode(b.dataset.mode);
+});
+// Nur Adresse: Tippen aufs Bild löst aus
+$('#quickVideo').addEventListener('click', () => { if (quickMode() !== 'code') quickPhoto(); });
+
+/** Foto-Taste: Etikett ohne lesbaren Code / Modus „Nur Adresse“ → nur Text erkennen */
 async function quickPhoto() {
   if (!quick?.scanner) return;
-  const blob = await quick.scanner.snapshot();
+  const now = Date.now();
+  if (now - (quick.lastShot || 0) < 600) return; // Doppeltipp
+  quick.lastShot = now;
+  const blob = await quick.scanner.snapshot(quickMode() !== 'code' ? $('#dlgQuick .q-frame') : null);
   if (!blob) return;
+  // Vorschau: so sieht man sofort, was aufgenommen wurde
+  const th = $('#quickThumb');
+  if (th.dataset.url) URL.revokeObjectURL(th.dataset.url);
+  th.dataset.url = URL.createObjectURL(blob);
+  th.src = th.dataset.url;
+  th.hidden = false;
+  if (quickMode() === 'list') {
+    // ganze Liste: Stopps entstehen erst nach dem Lesen (nur neue Adressen)
+    ocrQueue.push({ list: true, blob });
+    beep('text');
+    quickFlash('text', t('quick_list_queued'));
+    pumpQueues();
+    return;
+  }
   const stop = { id: uid(), address: '⏳', name: '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'ocr' };
   placeStop(stop);
   save();
@@ -1337,14 +1635,25 @@ async function ocrWorker() {
   ocrBusy = true;
   while (ocrQueue.length) {
     const job = ocrQueue.shift();
+    if (job.list) { await readList(job.blob); continue; }
     const s = state.stops.find((x) => x.id === job.id);
     if (!s) continue;
     updateQuickQueue();
     try {
       const { text } = await recognize(job.blob, () => {}, state.settings.ocr);
       const r = extractAddress(text);
+      s.ocrText = String(text || '').trim().slice(0, 600);
+      // Ergebnis sofort in der Schnellerfassung zeigen
+      if (quick) {
+        if (r.address) quickFlash('ok', '✓ ' + r.address);
+        else quickFlash('dup', '⚠ ' + t('quick_ocr_fail'));
+      }
       // gleiches Paket schon vorhanden (Sendungsnummer erst jetzt erkannt)?
+      const k = r.address ? normKey(r.address) : '';
       if (r.tracking && !s.tracking && state.stops.some((x) => x !== s && x.tracking === r.tracking)) {
+        state.stops.splice(state.stops.indexOf(s), 1);
+      } else if (k && !s.tracking && !r.tracking && state.stops.some((x) => x !== s && Math.abs(x.createdAt - s.createdAt) < 5000 && normKey(x.address) === k)) {
+        // dasselbe Etikett zweimal kurz hintereinander aufgenommen
         state.stops.splice(state.stops.indexOf(s), 1);
       } else if (r.address) {
         s.address = r.address;
@@ -1370,6 +1679,36 @@ async function ocrWorker() {
   ocrBusy = false;
   updateQuickQueue();
   maybeAllDone();
+}
+
+/** Foto einer Adressliste: alle Adressen lesen, nur neue als Stopps anlegen */
+async function readList(blob) {
+  updateQuickQueue();
+  let found = [];
+  try {
+    const { text } = await recognize(blob, () => {}, state.settings.ocr);
+    found = extractAddressList(text);
+  } catch {}
+  const have = new Set(state.stops.map((x) => normKey(x.address)));
+  let added = 0, dup = 0;
+  for (const a of found) {
+    const k = normKey(a.address);
+    if (have.has(k)) { dup++; continue; }
+    have.add(k);
+    const stop = { id: uid(), address: a.address, name: a.name || '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'geo' };
+    state.stops.push(stop); // Reihenfolge der Liste beibehalten
+    placeStop(stop);
+    geoQueue.push(stop.id);
+    added++;
+  }
+  if (added) { invalidateRoute(); save(); renderSoon(); }
+  if (quick) {
+    quick.count += added;
+    $('#quickCount').textContent = String(quick.count);
+    if (!found.length) { beep('dup'); quickFlash('dup', '⚠ ' + t('quick_list_none')); }
+    else { beep(added ? 'ok' : 'dup'); quickFlash(added ? 'ok' : 'dup', t('quick_list_result', { n: added, d: dup })); }
+  }
+  geoWorker();
 }
 
 /** Schnelle Suche: Adressbuch → Photon (Haus mit passender Nummer) → Nominatim */
@@ -1518,6 +1857,8 @@ $('#tourList').addEventListener('click', (e) => {
   const restored = restoreStops(tr);
   if (act === 'load') {
     if (state.stops.some(isOpen) && !confirm(t('tour_confirm_replace'))) return;
+    save(); // aktuelle Tour unter ihrem Datum sichern
+    if (state.tourDate < today()) state.tourDate = today();
     state.stops = restored;
   } else {
     const have = new Set(state.stops.map((s) => normKey(s.address)));
@@ -1610,12 +1951,16 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setNav').value = s.nav;
   $('#setAutoAdd').checked = s.autoAdd;
   $('#setSaverFirst').checked = s.saverFirst;
+  $('#rowMini').hidden = !NavOverlay;
+  $('#setMini').checked = s.miniWindow !== false;
   $('#setRadius').value = String(s.radius || 50);
   $('#setTrack').checked = !!s.trackVisits;
   $('#setDwell').value = String(s.dwellSec || 30);
   dlgS.showModal();
 });
-$('#btnSaveSettings').addEventListener('click', () => {
+/** Einstellungen übernehmen – sofort bei jeder Änderung (auch wenn das Fenster mit ✕ oder Wischen geschlossen wird) */
+function applySettings() {
+  const wasMini = state.settings.miniWindow;
   Object.assign(state.settings, {
     lang: $('#setLang').value,
     ocr: $('#setOcr').value,
@@ -1626,21 +1971,29 @@ $('#btnSaveSettings').addEventListener('click', () => {
     nav: $('#setNav').value,
     autoAdd: $('#setAutoAdd').checked,
     saverFirst: $('#setSaverFirst').checked,
+    miniWindow: $('#setMini').checked,
     radius: +$('#setRadius').value || 50,
     trackVisits: $('#setTrack').checked,
     dwellSec: +$('#setDwell').value || 30,
   });
+  if (state.settings.miniWindow && !wasMini) state.overlayAsked = false; // beim nächsten Navigieren noch einmal nach der Erlaubnis fragen
   save();
   startTracking();
   setLang(state.settings.lang);
   showView(currentView);
   render();
+}
+$('#dlgSettings').addEventListener('change', (e) => { if (e.target.closest('input, select')) applySettings(); });
+$('#btnSaveSettings').addEventListener('click', () => {
+  applySettings();
   toast(t('saved'));
 });
 $('#btnClearAll').addEventListener('click', () => {
   if (!confirm(t('confirm_clear_all'))) return;
   state.stops = [];
   state.route = null;
+  state.tourDate = today();
+  miniEnd();
   save();
   render();
   dlgS.close();
@@ -1659,6 +2012,7 @@ for (const st of state.stops) {
   else if (st.pending === 'ocr') { st.pending = null; st.review = true; }
 }
 render();
+if (navReturnStop()) showReturnBar(); // iPhone lädt die App nach dem Navi manchmal neu
 startTracking();
 initHardwareScanner();
 if (geoQueue.length) pumpQueues();

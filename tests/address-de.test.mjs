@@ -158,3 +158,45 @@ test('OCR-Müll hinter der Hausnummer (Punkte eines MaxiCodes)', () => {
   assert.equal(r.address, 'Rosenthaler Strasse 40, 10178 Berlin');
   assert.equal(r.name, 'Lisa Wagner');
 });
+
+test('Echtes UPS-Etikett (OCR mit Rahmenresten, Firmenzeilen über der Straße)', () => {
+  const ocr = `| I m = ee on oN
+HERR MUST3R MM 24 KG 1 OF 1
+Te BEISPIEL GMBH SHP#: 999X 9XXX XXX
+2 GEWERBESTRASSE No SHP WT: 24.0 KG
+12345 MUSTERDORF DATE: 23 NOV 2026
+SHIP TO:
+ABT 100
+BEISPIEL HANDEL GMBH
+| WERKSTRASSE 6-8
+54321 MUSTERSTADT
+8 5 _-
+= DEU 093 9-00
+Fe JIN |
+UPS STANDARD :
+TRACKING #: 1Z 999 X9X 68 1234 5678 |`;
+  const r = extractAddress(ocr);
+  assert.equal(r.address, 'Werkstrasse 6-8, 54321 Musterstadt');
+  assert.equal(r.tracking, '1Z999X9X6812345678');
+  assert.equal(r.service, '');
+  assert.match(r.name, /Beispiel Handel GmbH/);
+});
+
+test('UPS-Etikett: ß als B gelesen, verlesenes SHIP TO, Absender darüber', () => {
+  const text = `HERR MUSTERMANN 1 KG
+49530000000
+MUSTER MEDIA GMBH SHP#: 6il;
+KURT — MUSTER—STR. 9 SHP WT
+12345 MUSTERDORF DWT: 433
+ili TO:
+
+KAUF’S! GETRÄNKE GMBH
+
+LINDENER STRABE 102
+
+54321 MUSTERSTADT`;
+  const r = extractAddress(text);
+  assert.match(r.address, /^Lindener Stra(ss|ß)e 102, 54321 Musterstadt$/);
+  assert.equal(r.name, 'Kauf’S! Getränke GmbH');
+  assert.ok(!/to\b/i.test(r.name), r.name);
+});
