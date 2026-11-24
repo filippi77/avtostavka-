@@ -642,3 +642,20 @@ dialog.quick::backdrop { background: #000; }
 /* Zeile unter dem nächsten Stopp: bis zu 5 Knöpfe – Beschriftungen dürfen nicht ineinanderlaufen */
 .next-more .btn span { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .next-more .btn.danger { color: var(--red, #c62828); }
+
+/* ---------- Rückkehr vom Navi ---------- */
+.return-bar {
+  position: fixed; left: 8px; right: 8px; z-index: 1001;
+  bottom: calc(var(--tab-h) + 8px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+  background: var(--bar, #351c15); color: #fff; border-radius: 18px; padding: 10px 12px 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); display: grid; gap: 10px;
+}
+.return-bar[hidden] { display: none; }
+.return-head { display: flex; align-items: center; gap: 8px; }
+.return-head > span { flex: 1; min-width: 0; display: grid; }
+.return-head small { color: var(--gold); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.return-head b { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.return-head .x-btn { background: rgba(255,255,255,.15); color: #fff; }
+.return-btns { display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; }
+.return-btns .btn { min-height: 54px; font-size: 16px; font-weight: 800; }
+.return-btns .btn.warn { background: #c2410c; color: #fff; }

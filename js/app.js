@@ -167,6 +167,7 @@ function render() {
   $('#tourOld').hidden = !old;
   $('#tourBar').classList.toggle('old', old);
   syncMiniSoon();
+  if (!$('#returnBar').hidden && !navReturnStop()) $('#returnBar').hidden = true;
   $('#btnNewTour').classList.toggle('primary', old);
 
   // Nächster Stopp
@@ -1169,10 +1170,57 @@ function openNavDirect(app, points) {
   if (points.length > count) toast(count > 1 ? t('nav_first_n', { app: navName(app), n: count }) : t('single_dest', { app: navName(app) }), 4000);
   else if (coordsOnly && !useCoords(points[0])) toast(t('nav_coords_hint'), 4500);
   window.__lastNav = url; // für automatisierte Tests
+  // merken, wohin navigiert wird – bei der Rückkehr in die App: „Zugestellt → nächster Stopp“
+  state.navTo = { id: points[0].id, app, at: Date.now(), multi: points.length > 1 };
+  save();
   // App-Schemata (yandexnavi:, geo: …) und die Android-App: direkt aufrufen; Webseiten im neuen Tab
   if (IS_NATIVE || isAppScheme(url)) window.location.href = url;
   else window.open(url, '_blank');
 }
+
+/* ---------- Rückkehr vom Navi: ein Tipp für „Zugestellt“ und weiter zum nächsten Stopp ---------- */
+let leftForNav = false;
+function navReturnStop() {
+  const n = state.navTo;
+  if (!n || Date.now() - n.at > 4 * 3600e3) return null;
+  const s = state.stops.find((x) => x.id === n.id);
+  return s && isOpen(s) ? s : null;
+}
+function showReturnBar() {
+  const s = navReturnStop();
+  $('#returnBar').hidden = !s;
+  if (!s) return;
+  $('#returnAddr').textContent = splitAddr(s.address).street;
+  const next = state.stops.find((x) => isOpen(x) && x !== s && (hasPos(x) || NAV_APPS[state.navTo.app]?.text));
+  $('#btnReturnDone').querySelector('span').textContent = next ? t('ret_done_next') : t('delivered');
+  $('#btnReturnFail').querySelector('span').textContent = next ? t('ret_fail_next') : t('not_home_short');
+}
+function hideReturnBar() {
+  state.navTo = null;
+  save();
+  $('#returnBar').hidden = true;
+}
+function returnAct(status) {
+  const s = navReturnStop();
+  const app = state.navTo?.app || state.settings.nav;
+  const multi = state.navTo?.multi;
+  hideReturnBar();
+  if (!s) return;
+  setStatus(s, status);
+  save();
+  render();
+  const rest = state.stops.filter((x) => isOpen(x) && (hasPos(x) || NAV_APPS[app]?.text));
+  if (!rest.length) return toast(t('quick_done'));
+  try { navigator.vibrate?.(40); } catch {}
+  openNavWith(app === 'ask' ? state.settings.nav : app, multi ? rest : [rest[0]]);
+}
+$('#btnReturnDone').addEventListener('click', () => returnAct('delivered'));
+$('#btnReturnFail').addEventListener('click', () => returnAct('failed'));
+$('#btnReturnClose').addEventListener('click', hideReturnBar);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (state.navTo && Date.now() - state.navTo.at < 5000) leftForNav = true; }
+  else if (leftForNav) { leftForNav = false; showReturnBar(); }
+});
 
 let navPending = [];
 function openNav(points) {
@@ -1905,6 +1953,7 @@ for (const st of state.stops) {
   else if (st.pending === 'ocr') { st.pending = null; st.review = true; }
 }
 render();
+if (navReturnStop()) showReturnBar(); // iPhone lädt die App nach dem Navi manchmal neu
 startTracking();
 initHardwareScanner();
 if (geoQueue.length) pumpQueues();

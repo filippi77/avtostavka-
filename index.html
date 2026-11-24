@@ -122,6 +122,18 @@
     </section>
   </main>
 
+  <!-- Rückkehr vom Navi -->
+  <div class="return-bar" id="returnBar" hidden>
+    <div class="return-head">
+      <span><small data-i18n="ret_back">Zurück vom Navi</small><b id="returnAddr"></b></span>
+      <button type="button" class="x-btn" id="btnReturnClose" data-i18n-aria="close">✕</button>
+    </div>
+    <div class="return-btns">
+      <button type="button" class="btn success" id="btnReturnDone"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg><span></span></button>
+      <button type="button" class="btn warn" id="btnReturnFail"><span></span></button>
+    </div>
+  </div>
+
   <nav class="tabbar">
     <button class="tab active" data-view="list">
       <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/></svg>
