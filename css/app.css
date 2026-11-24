@@ -572,3 +572,32 @@ body { background: var(--bg); }
 .help-link { margin-top: 4px; }
 #dlgSettings .help-link { text-decoration: none; }
 
+
+/* ---------- Schnellerfassung ---------- */
+.quick-tour { margin-top: 12px; }
+.quick-tour svg, #btnQuickEmpty svg { width: 22px; height: 22px; }
+#btnScanEmpty { width: 100%; max-width: 340px; }
+.chip.busy { background: var(--blue-soft); color: var(--blue); }
+.busy-text { color: var(--blue); }
+dialog.quick { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; color: #fff; overflow: hidden; }
+dialog.quick::backdrop { background: #000; }
+#quickVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.q-frame { position: absolute; left: 50%; top: 45%; width: min(70vw, 320px); aspect-ratio: 1; transform: translate(-50%, -50%); border: 3px solid rgba(255, 181, 0, .9); border-radius: 22px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .25); pointer-events: none; }
+.q-flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.q-flash.on { animation: qflash .5s ease-out; }
+.q-flash.ok { background: rgba(46, 158, 79, .45); }
+.q-flash.text { background: rgba(255, 181, 0, .45); }
+.q-flash.dup { background: rgba(224, 53, 43, .45); }
+@keyframes qflash { from { opacity: 1; } to { opacity: 0; } }
+.q-top { position: absolute; top: 0; left: 0; right: 0; padding: calc(10px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))) 14px 10px; display: flex; align-items: center; justify-content: space-between; background: linear-gradient(rgba(0,0,0,.6), transparent); }
+.q-btn { background: rgba(0, 0, 0, .45); color: #fff; font-size: 18px; }
+.q-count { text-align: center; line-height: 1; }
+.q-count b { display: block; font-size: 44px; font-weight: 800; color: var(--gold); }
+.q-count span { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+.q-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 14px calc(14px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); background: linear-gradient(transparent, rgba(0,0,0,.75) 25%); display: grid; gap: 8px; }
+.q-status { font-size: 15px; text-align: center; color: rgba(255,255,255,.85); }
+.q-last { font-size: 20px; font-weight: 800; text-align: center; min-height: 1.3em; }
+.q-queue { font-size: 14px; text-align: center; color: var(--gold); min-height: 1.2em; }
+.q-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.q-btns .btn { min-height: 56px; }
+.q-btns .btn:not(.primary) { background: rgba(255,255,255,.15); color: #fff; }

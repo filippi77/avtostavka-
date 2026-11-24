@@ -7,6 +7,8 @@ import { buildRoute, haversine } from './route.js';
 import { DwellTracker, pruneVisits, visitsCsv } from './visits.js';
 import { NAV_APPS, navLink, appsFor, platformOf, defaultApp, isAppScheme } from './navigate.js';
 import { recognize, warmUp } from './ocr.js';
+import { LiveScanner, unlockAudio, beep, loadZXing } from './livescan.js';
+import { suggest as suggestFast } from './autocomplete.js';
 import { t, setLang, getLang, applyI18n, fmtDist, fmtTime } from './i18n.js';
 
 const $ = (s) => document.querySelector(s);
@@ -175,7 +177,9 @@ function chipsHtml(s) {
   const chips = [];
   const here = tracker?.presentAt();
   if (here && here.stopId === s.id) chips.push(`<span class="chip here">📍 ${esc(t('here_since', { t: fmtClock(here.since) }))}</span>`);
-  if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
+  if (s.pending) chips.push(`<span class="chip busy">⏳ ${esc(t('pending_' + s.pending))}</span>`);
+  else if (s.review) chips.push(`<span class="chip warn">⚠ ${esc(t('review'))}</span>`);
+  else if (!hasPos(s)) chips.push(`<span class="chip warn">${esc(t('no_coords'))}</span>`);
   else if (s.precision === 'street') chips.push(`<span class="chip warn">⚠ ${esc(t('street_only'))}</span>`);
   if (leg) chips.push(`<span class="chip">${fmtDist(leg.distance)} · ${fmtTime(leg.duration)}</span>`);
   if (s.note) chips.push(`<span class="chip">${esc(s.note)}</span>`);
@@ -221,7 +225,9 @@ function nextCardHtml(s) {
 function rowHtml(s, num, { first = false, last = false } = {}) {
   const { street, city } = splitAddr(s.address);
   const leg = state.route?.legsById?.[s.id];
-  const sub = (isOpen(s) ? [s.name, city] : [doneInfo(s), s.name]).filter(Boolean).map(esc).join(' · ');
+  let sub = (isOpen(s) ? [s.name, city] : [doneInfo(s), s.name]).filter(Boolean).map(esc).join(' · ');
+  if (s.pending) sub = `<span class="busy-text">⏳ ${esc(t('pending_' + s.pending))}</span>`;
+  else if (s.review) sub = `<span class="warn">⚠ ${esc(t('review'))}</span>`;
   const cls = ['row', s.status, hasPos(s) ? '' : 'nocoords', isExpress(s) && isOpen(s) ? 'svc-' + s.service : '', openId === s.id ? 'open' : ''].join(' ');
   const badge = s.status === 'delivered' ? '✓' : s.status === 'failed' ? '!' : num;
   const actions = isOpen(s)
@@ -249,7 +255,7 @@ function rowHtml(s, num, { first = false, last = false } = {}) {
         <span class="badge">${badge}</span>
         <span class="row-text">
           <span class="row-street" style="display:block">${isExpress(s) && isOpen(s) ? `<span class="svc-mini svc-${s.service}">${SVC_CODE[s.service]}</span>` : ''}${esc(street)}</span>
-          <span class="row-sub" style="display:block">${hasPos(s) ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}${s.tracking ? ` <span class="trk-mini">…${esc(s.tracking.slice(-4))}</span>` : ''}</span>
+          <span class="row-sub" style="display:block">${hasPos(s) || s.pending || s.review ? sub || '&nbsp;' : `<span class="warn">${esc(t('no_coords'))}</span>`}${s.tracking ? ` <span class="trk-mini">…${esc(s.tracking.slice(-4))}</span>` : ''}</span>
         </span>
         ${leg && isOpen(s) ? `<span class="row-eta">${fmtDist(leg.distance)}<br>${fmtTime(leg.duration)}</span>` : ''}
         ${ICON.chev}
@@ -511,6 +517,7 @@ async function initHardwareScanner() {
 /** Gescannter Code: Paket schon in der Tour → anzeigen; sonst neues Paket mit den Daten aus dem Code */
 async function onHardwareScan(data, type) {
   const r = parseScan(data, type);
+  if (quick) return quickAdd(r, null); // Schnellerfassung läuft → direkt in die Warteschlange
   if (r.kind === 'other') return toast(t('scan_unknown'));
   try { navigator.vibrate?.(40); } catch {}
   const known = r.tracking && state.stops.find((x) => x.tracking === r.tracking);
@@ -752,6 +759,8 @@ function commitAdd({ withoutCoords = false, next = false, stayOpen = false } = {
   if (editing) {
     const oldPrio = prioOf(editing);
     stop = Object.assign(editing, data);
+    stop.review = false;
+    stop.pending = null;
     if (c) { stop.lat = c.lat; stop.lon = c.lon; stop.geoLabel = c.label; stop.precision = c.precision || ''; }
     if (oldPrio !== prioOf(stop)) placeStop(stop);
   } else {
@@ -1184,6 +1193,252 @@ function tourTitle(tr) {
   return d.toLocaleDateString(getLang(), { weekday: 'long', day: '2-digit', month: '2-digit' });
 }
 
+/* ---------------- Schnellerfassung: viele Pakete hintereinander ---------------- */
+// Kamera läuft dauerhaft, MaxiCode wird live gelesen. Jedes Paket landet sofort in der Tour;
+// Texterkennung (falls die Adresse nicht im Code steht) und Adresssuche laufen im Hintergrund.
+
+let quick = null; // { scanner, lastKey, lastAt, count }
+const ocrQueue = []; // { id, blob }
+const geoQueue = []; // Stopp-IDs
+let ocrBusy = false;
+let geoBusy = false;
+let renderTimer = null;
+const renderSoon = () => { clearTimeout(renderTimer); renderTimer = setTimeout(render, 250); };
+
+async function openQuick() {
+  unlockAudio();
+  quick = { scanner: null, lastKey: '', lastAt: 0, count: 0 };
+  $('#quickCount').textContent = '0';
+  $('#quickLast').textContent = '';
+  $('#quickStatus').textContent = t('quick_starting');
+  updateQuickQueue();
+  $('#dlgQuick').showModal();
+  if (!myPos) locate(); // für die Adresssuche in der Nähe
+  const sc = new LiveScanner($('#quickVideo'), onQuickCode);
+  quick.scanner = sc;
+  try {
+    await sc.start();
+    if (!quick) return sc.stop();
+    $('#quickStatus').textContent = t('quick_ready');
+  } catch (err) {
+    console.error(err);
+    $('#quickStatus').textContent = err?.message === 'ZXing' ? t('quick_lib_error') : t('quick_cam_error');
+  }
+}
+
+function closeQuick() {
+  quick?.scanner?.stop();
+  quick = null;
+  if ($('#dlgQuick').open) $('#dlgQuick').close();
+  render();
+  if (!ocrQueue.length && !geoQueue.length && !ocrBusy && !geoBusy) maybeAllDone();
+}
+
+function onQuickCode({ text, format }) {
+  if (!quick) return;
+  const r = parseScan(text, format === 'MaxiCode' ? 'MAXICODE' : format);
+  const key = r.tracking || text;
+  const now = Date.now();
+  if (key === quick.lastKey && now - quick.lastAt < 2500) return; // dasselbe Etikett ist noch im Bild
+  quick.lastKey = key;
+  quick.lastAt = now;
+  quickAdd(r, () => quick?.scanner?.snapshot());
+}
+
+function quickFlash(kind, text) {
+  const f = $('#quickFlash');
+  f.className = 'q-flash ' + kind;
+  void f.offsetWidth;
+  f.classList.add('on');
+  $('#quickLast').textContent = text;
+}
+
+/** Ein gescanntes Paket aufnehmen (Kamera oder Hardware-Scanner) */
+async function quickAdd(r, getSnapshot) {
+  if (r.kind === 'other' && !getSnapshot) return;
+  if (r.tracking && state.stops.some((x) => x.tracking === r.tracking)) {
+    beep('dup');
+    try { navigator.vibrate?.([30, 60, 30]); } catch {}
+    return quickFlash('dup', t('quick_dup', { t: '…' + r.tracking.slice(-4) }));
+  }
+  const addr = scanAddress(r);
+  const stop = {
+    id: uid(),
+    address: addr ? smartCase(addr) : '1Z…' + (r.tracking ? r.tracking.slice(-4) : '????') + (r.postcode ? ', ' + r.postcode : ''),
+    name: '', phone: '', note: '',
+    lat: null, lon: null, precision: '',
+    status: 'pending',
+    service: r.service || '',
+    express: !!r.service,
+    tracking: r.tracking || '',
+    createdAt: Date.now(),
+    pending: addr ? 'geo' : 'ocr',
+  };
+  placeStop(stop);
+  invalidateRoute();
+  save();
+  if (quick) {
+    quick.count++;
+    $('#quickCount').textContent = String(quick.count);
+  }
+  try { navigator.vibrate?.(40); } catch {}
+  if (addr) {
+    geoQueue.push(stop.id);
+    beep('ok');
+    quickFlash('ok', '✓ ' + splitAddr(stop.address).street);
+  } else {
+    const blob = getSnapshot ? await getSnapshot() : null;
+    if (blob) {
+      ocrQueue.push({ id: stop.id, blob });
+      beep('text');
+      quickFlash('text', t('quick_text_queued', { t: stop.address }));
+    } else {
+      stop.pending = null;
+      stop.review = true;
+      beep('text');
+      quickFlash('text', t('quick_no_addr', { t: stop.address }));
+    }
+  }
+  renderSoon();
+  pumpQueues();
+}
+
+/** Foto-Taste in der Schnellerfassung: Etikett ohne lesbaren Code → nur Text erkennen */
+async function quickPhoto() {
+  if (!quick?.scanner) return;
+  const blob = await quick.scanner.snapshot();
+  if (!blob) return;
+  const stop = { id: uid(), address: '⏳', name: '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'ocr' };
+  placeStop(stop);
+  save();
+  quick.count++;
+  $('#quickCount').textContent = String(quick.count);
+  ocrQueue.push({ id: stop.id, blob });
+  beep('text');
+  quickFlash('text', t('quick_photo_queued'));
+  renderSoon();
+  pumpQueues();
+}
+
+function updateQuickQueue() {
+  const busy = ocrQueue.length + geoQueue.length + (ocrBusy ? 1 : 0) + (geoBusy ? 1 : 0);
+  const review = state.stops.filter((x) => isOpen(x) && x.review).length;
+  $('#quickQueue').textContent = busy || review ? t('quick_queue', { n: busy, r: review }) : '';
+}
+
+function pumpQueues() {
+  updateQuickQueue();
+  ocrWorker();
+  geoWorker();
+}
+
+async function ocrWorker() {
+  if (ocrBusy) return;
+  ocrBusy = true;
+  while (ocrQueue.length) {
+    const job = ocrQueue.shift();
+    const s = state.stops.find((x) => x.id === job.id);
+    if (!s) continue;
+    updateQuickQueue();
+    try {
+      const { text } = await recognize(job.blob, () => {}, state.settings.ocr);
+      const r = extractAddress(text);
+      // gleiches Paket schon vorhanden (Sendungsnummer erst jetzt erkannt)?
+      if (r.tracking && !s.tracking && state.stops.some((x) => x !== s && x.tracking === r.tracking)) {
+        state.stops.splice(state.stops.indexOf(s), 1);
+      } else if (r.address) {
+        s.address = r.address;
+        s.name = s.name || r.name;
+        s.phone = s.phone || r.phone;
+        s.note = s.note || r.note;
+        if (!s.tracking && r.tracking) s.tracking = r.tracking;
+        if (!s.service && r.service) { s.service = r.service; s.express = true; placeStop(s); }
+        s.pending = 'geo';
+        geoQueue.push(s.id);
+      } else {
+        s.pending = null;
+        s.review = true;
+      }
+    } catch {
+      s.pending = null;
+      s.review = true;
+    }
+    save();
+    renderSoon();
+    geoWorker();
+  }
+  ocrBusy = false;
+  updateQuickQueue();
+  maybeAllDone();
+}
+
+/** Schnelle Suche: Adressbuch → Photon (Haus mit passender Nummer) → Nominatim */
+async function geocodeFast(address) {
+  const known = lookup(state.book, address);
+  if (known?.lat != null) return { lat: known.lat, lon: known.lon, precision: known.precision };
+  const nr = (splitAddr(address).street.match(/(\d+\s?[a-z]?)\s*$/i)?.[1] || '').toLowerCase().replace(/\s/g, '');
+  try {
+    const list = await suggestFast(address, { center: searchCenter(), radiusKm: Math.max(+state.settings.radius || 50, 100), lang: getLang(), limit: 5 });
+    const house = list.find((x) => x.kind === 'house' && (!nr || x.hnr === nr));
+    if (house) return { lat: house.lat, lon: house.lon, precision: 'house' };
+  } catch {}
+  const c = await geocode(address, { country: state.settings.country.trim().toLowerCase(), city: state.settings.city, near: searchCenter(), radiusKm: Math.max(+state.settings.radius || 50, 100), lang: getLang() });
+  return c[0] ? { lat: c[0].lat, lon: c[0].lon, precision: c[0].precision, postcode: c[0].postcode, city: c[0].city } : null;
+}
+
+async function geoWorker() {
+  if (geoBusy) return;
+  geoBusy = true;
+  while (geoQueue.length) {
+    const s = state.stops.find((x) => x.id === geoQueue[0]);
+    geoQueue.shift();
+    if (!s) continue;
+    updateQuickQueue();
+    try {
+      const c = await geocodeFast(s.address);
+      if (c) {
+        s.lat = c.lat;
+        s.lon = c.lon;
+        s.precision = c.precision || '';
+        if (c.postcode && c.city && !/(^|\D)\d{4,5}\s+\p{L}/u.test(s.address)) s.address += `, ${c.postcode} ${c.city}`;
+        remember(state.book, s);
+        s.review = false;
+      } else {
+        s.review = true;
+      }
+      s.pending = null;
+    } catch {
+      // kein Netz → später nochmal
+      geoQueue.push(s.id);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    save();
+    renderSoon();
+  }
+  geoBusy = false;
+  updateQuickQueue();
+  maybeAllDone();
+}
+
+function maybeAllDone() {
+  if (quick || ocrBusy || geoBusy || ocrQueue.length || geoQueue.length) return;
+  const fresh = state.stops.filter((x) => isOpen(x) && x.createdAt > Date.now() - 6 * 3600e3).length;
+  if (!fresh) return;
+  const review = state.stops.filter((x) => isOpen(x) && x.review).length;
+  toast(review ? t('quick_done_review', { n: review }) : t('quick_done'), 5000);
+}
+
+$('#btnQuickFinish').addEventListener('click', closeQuick);
+$('#btnQuickClose').addEventListener('click', closeQuick);
+$('#btnQuickPhoto').addEventListener('click', quickPhoto);
+$('#btnQuickTorch').addEventListener('click', async () => {
+  if (!quick?.scanner) return;
+  quick.torchOn = !quick.torchOn;
+  if (!(await quick.scanner.torch(quick.torchOn))) toast(t('quick_no_torch'));
+});
+$('#dlgQuick').addEventListener('close', () => { if (quick) closeQuick(); });
+for (const id of ['#btnQuickEmpty', '#btnQuickTour']) $(id).addEventListener('click', openQuick);
+
 function dayKey(ms) {
   return today(new Date(ms));
 }
@@ -1398,11 +1653,17 @@ if (NativeScanner) {
   $('#photoEmpty small').dataset.i18n = 'scan_live_hint';
 }
 setLang(state.settings.lang);
+// unterbrochene Hintergrundarbeit nach Neustart fortsetzen
+for (const st of state.stops) {
+  if (st.pending === 'geo') geoQueue.push(st.id);
+  else if (st.pending === 'ocr') { st.pending = null; st.review = true; }
+}
 render();
 startTracking();
 initHardwareScanner();
+if (geoQueue.length) pumpQueues();
 if (!IS_NATIVE && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 // für automatisierte Tests
-window.__app = { state: () => state, render, optimize, onHardwareScan };
+window.__app = { state: () => state, render, optimize, onHardwareScan, openQuick, closeQuick };

@@ -152,3 +152,9 @@ test('SHIP TO in einer Zeile, Absender oben', () => {
   assert.equal(r.name, 'Max Müller-Lüdenscheid');
   assert.equal(r.service, '');
 });
+
+test('OCR-Müll hinter der Hausnummer (Punkte eines MaxiCodes)', () => {
+  const r = extractAddress(`SHIP TO:\nLISA WAGNER\nROSENTHALER STRASSE 40 TAB SRE hos\n10178 BERLIN\nGERMANY`);
+  assert.equal(r.address, 'Rosenthaler Strasse 40, 10178 Berlin');
+  assert.equal(r.name, 'Lisa Wagner');
+});

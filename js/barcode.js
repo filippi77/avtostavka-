@@ -59,9 +59,10 @@ export function parseScan(data, type = '') {
     // f[0]=PLZ, f[1]=Land, f[2]=Service, f[3]=Tracking, f[4]=SCAC, f[5]=Versender, f[6]=Julian, f[7]=Sendungs-ID,
     // f[8]=n/x, f[9]=Gewicht, f[10]=Adressprüfung, f[11]=Straße, f[12]=Ort, f[13]=Bundesland
     out.kind = 'maxicode';
-    const plz = (f[0] || '').match(/^\d{4,5}/);
-    if (plz) out.postcode = plz[0];
     if (/^\d{3}$/.test(f[1] || '')) out.country = f[1];
+    // PLZ: Deutschland 5-stellig; Österreich (040) und Schweiz (756) 4-stellig (UPS füllt mit Nullen auf)
+    const plz = (f[0] || '').match(out.country === '040' || out.country === '756' ? /^\d{4}/ : /^\d{5}/);
+    if (plz) out.postcode = plz[0];
     if (/^\d{3}$/.test(f[2] || '')) out.service = SERVICE[f[2]] ?? null;
     if (!out.tracking && /^1Z/i.test(f[3] || '')) out.tracking = f[3].toUpperCase();
     // Straße/Ort nur übernehmen, wenn sie wie Klartext aussehen (keine komprimierten Daten)

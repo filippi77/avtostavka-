@@ -52,7 +52,11 @@
         </div>
         <h2 data-i18n="empty_title">Noch keine Pakete</h2>
         <p data-i18n="empty_text"></p>
-        <button class="btn primary big" id="btnScanEmpty">
+        <button class="btn primary big" id="btnQuickEmpty">
+          <svg viewBox="0 0 24 24"><path d="M3 9V6a3 3 0 0 1 3-3h3M15 3h3a3 3 0 0 1 3 3v3M21 15v3a3 3 0 0 1-3 3h-3M9 21H6a3 3 0 0 1-3-3v-3"/><path d="m13 7-3 5h4l-3 5"/></svg>
+          <span data-i18n="quick_btn">Schnellerfassung (viele Pakete)</span>
+        </button>
+        <button class="btn big" id="btnScanEmpty">
           <svg viewBox="0 0 24 24"><path d="M3 9V6a3 3 0 0 1 3-3h3M15 3h3a3 3 0 0 1 3 3v3M21 15v3a3 3 0 0 1-3 3h-3M9 21H6a3 3 0 0 1-3-3v-3"/><path d="M7 12h10"/></svg>
           <span data-i18n="scan_label">Etikett scannen</span>
         </button>
@@ -74,6 +78,7 @@
         <ol class="group" id="stops"></ol>
       </div>
 
+      <button class="btn wide quick-tour" id="btnQuickTour"><svg viewBox="0 0 24 24"><path d="M3 9V6a3 3 0 0 1 3-3h3M15 3h3a3 3 0 0 1 3 3v3M21 15v3a3 3 0 0 1-3 3h-3M9 21H6a3 3 0 0 1-3-3v-3"/><path d="m13 7-3 5h4l-3 5"/></svg><span data-i18n="quick_btn">Schnellerfassung (viele Pakete)</span></button>
       <button class="btn plain wide" id="btnManual" hidden data-i18n="manual_add">+ Adresse manuell eingeben</button>
 
       <details class="done-wrap" id="doneWrap" hidden>
@@ -325,6 +330,29 @@
         <label class="switch"><span data-i18n="nav_remember">Als Standard merken</span><input type="checkbox" id="navRemember"><i></i></label>
       </div>
     </form>
+  </dialog>
+
+  <!-- Schnellerfassung: Live-Kamera -->
+  <dialog id="dlgQuick" class="quick">
+    <video id="quickVideo" playsinline muted autoplay></video>
+    <div class="q-frame"></div>
+    <div class="q-flash" id="quickFlash"></div>
+    <div class="q-top">
+      <button class="round-btn q-btn" id="btnQuickClose" data-i18n-aria="close">✕</button>
+      <div class="q-count"><b id="quickCount">0</b><span data-i18n="quick_scanned">erfasst</span></div>
+      <button class="round-btn q-btn" id="btnQuickTorch" aria-label="Licht">
+        <svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+      </button>
+    </div>
+    <div class="q-bottom">
+      <div class="q-status" id="quickStatus"></div>
+      <div class="q-last" id="quickLast"></div>
+      <div class="q-queue" id="quickQueue"></div>
+      <div class="q-btns">
+        <button type="button" class="btn" id="btnQuickPhoto">📷 <span data-i18n="quick_photo">Text lesen</span></button>
+        <button type="button" class="btn primary" id="btnQuickFinish" data-i18n="quick_finish">Fertig</button>
+      </div>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" role="status"></div>

@@ -41,3 +41,11 @@ test('Platzhalter statt Steuerzeichen (Scanner-Einstellung)', () => {
 test('Unbekannter Code', () => {
   assert.equal(parseScan('4006381333931', 'EAN13').kind, 'other');
 });
+
+test('MaxiCode: PLZ mit aufgefüllten Nullen (Mode 2), Österreich 4-stellig', () => {
+  const de = parseScan(`[)>${RS}01${GS}96101150000${GS}276${GS}011${GS}1Z999AA10123456784${GS}UPSN${GS}X${GS}1${GS}${GS}1/1${GS}1${GS}Y${GS}TORSTRASSE 101${GS}BERLIN${GS}${RS}${EOT}`, 'MaxiCode');
+  assert.equal(de.postcode, '10115');
+  const at = parseScan(`[)>${RS}01${GS}96107000000${GS}040${GS}011${GS}1Z999AA10123456784${GS}UPSN${GS}X${GS}1${GS}${GS}1/1${GS}1${GS}Y${GS}MARIAHILFER STRASSE 88${GS}WIEN${GS}${RS}${EOT}`, 'MaxiCode');
+  assert.equal(at.postcode, '1070');
+  assert.equal(scanAddress(at), 'MARIAHILFER STRASSE 88, 1070 WIEN');
+});

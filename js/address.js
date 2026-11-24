@@ -71,8 +71,15 @@ function matchPlz(line) {
   return { code: m[1], city: m[2].trim(), five: m[1].length === 5 };
 }
 
+/** OCR-Müll hinter der Hausnummer abschneiden ("ROSENTHALER STRASSE 40 TAB SRE" → "… 40") */
+function trimAfterNumber(l) {
+  if (DE_STREET.test(l)) return l;
+  const m = l.match(new RegExp(`^(.*?\\D\\s(${HNR}))\\s+\\S.*$`, 'iu'));
+  return m && DE_STREET.test(m[1]) ? m[1] : l;
+}
+
 function streetScore(line) {
-  const l = line.replace(DE_RECIPIENT, '').trim();
+  const l = trimAfterNumber(line.replace(DE_RECIPIENT, '').trim());
   if (DE_PACKSTATION.test(l)) return 5;
   if (DE_POSTNUMMER.test(l)) return 0;
   if (DE_STREET.test(l)) return 4;
@@ -145,7 +152,7 @@ function extractGerman(rawLines) {
   cands.sort((a, b) => b.score - a.score || b.i - a.i);
   const c = cands[0];
 
-  const street = c.si >= 0 ? normalizeStreet(lines[c.si].replace(DE_RECIPIENT, '').trim()) : '';
+  const street = c.si >= 0 ? normalizeStreet(trimAfterNumber(lines[c.si].replace(DE_RECIPIENT, '').trim())) : '';
   const address = [street, `${c.plz.code} ${c.plz.city}`].filter(Boolean).join(', ');
 
   // Name: Zeile(n) direkt über der Straße (c/o-Zeilen überspringen → als Notiz)
