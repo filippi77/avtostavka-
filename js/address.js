@@ -41,6 +41,8 @@ function fixOcr(line) {
     .replace(/(\d)[OО](?=[\d\s,]|$)/g, (_, d) => d + '0')
     .replace(/(\d)[OО](?=[\d\s,]|$)/g, (_, d) => d + '0')
     .replace(/(\d)[lI|](?=\d)/g, (_, d) => d + '1')
+    // ß wird auf Etiketten oft als B oder 8 gelesen: "BAVENSTEDTER STRABE 102" → "STRASSE"
+    .replace(/(s)(tra)[b8](e)(?=[\s\d,.]|$)/giu, (_, s1, t, e) => s1 + t + (t === t.toUpperCase() ? 'SS' : 'ß') + e)
     // Reste von Rahmenlinien/Kanten am Zeilenanfang und -ende ("| INDUSTRIESTRASSE 6-8 |")
     .replace(/^[\s|¦!\[\](){}_=~—–:;,.'`*•·>]+(?=[\p{L}\d])/u, '')
     .replace(/([\p{L}\d.])[\s|¦\[\](){}_=~—–:;,'`*•·<]+$/u, '$1')
@@ -49,7 +51,7 @@ function fixOcr(line) {
 
 /* ===================== Deutsch ===================== */
 
-const DE_RECIPIENT = /^\s*(?:(?:empfänger(?:in)?|lieferadresse|lieferanschrift|zustelladresse|versandadresse|ship\s*to|deliver\s*to|recipient|куда|кому|получатель|адрес\s+(?:получателя|доставки))(?:\s*[:.\-]\s*|\s+|$)|(?:an|to)\s*:\s*|ship\s*$)/iu;
+const DE_RECIPIENT = /^\s*(?:(?:empfänger(?:in)?|lieferadresse|lieferanschrift|zustelladresse|versandadresse|ship\s*to|deliver\s*to|recipient|куда|кому|получатель|адрес\s+(?:получателя|доставки))(?:\s*[:.\-]\s*|\s+|$)|(?:an|to)\s*:\s*|ship\s*$|[\p{L}|!.,']{1,5}\s+to\s*:?\s*$)/iu; // auch verlesenes "SHIP TO:" ("ili TO:")
 const DE_SENDER = /^\s*(?:(?:absender(?:in)?|abs\.|abs|sender|versender|return(?:\s+address)?|rücksende(?:adresse|anschrift)?|retour(?:e|enadresse)?|отправитель|от\s+кого|откуда)(?:\s*[:.\-]\s*|\s+|$)|(?:von|from|versand)\s*:\s*)/iu;
 const DE_STOP = /^\s*(tel|telefon|phone|mobil|handy|e-?mail|gewicht|weight|sendungs?(nummer|-?nr)|paket-?nr|tracking|referenz|ref\.|bestell|auftrag|kunden-?nr|datum|date|inhalt|warenwert|hinweis|zustellhinweis|lieferhinweis|nachnahme|vers(and)?art|service|produkt|shp|dwt|billing|ups\s|1z\s?[0-9a-z]{3}|\d+\s*(?:kg|lbs?)\b|\d+\s+of\s+\d+|тел|вес|заказ|трек)/iu;
 
@@ -168,7 +170,7 @@ function extractGerman(rawLines) {
   for (let j = top - 1; j >= Math.max(0, top - 4) && names.length < 2; j--) {
     if (ex.has(j)) break;
     const l = lines[j].replace(DE_RECIPIENT, '').trim();
-    if (!l) continue;
+    if (!l) { if (DE_RECIPIENT.test(lines[j])) break; continue; } // "SHIP TO:" – darüber beginnt der Absender
     if (/^(c\/o|z\.\s?hd|attn|att\.|z\.hd)/i.test(l)) { note = note || l; continue; }
     if (DE_POSTNUMMER.test(l)) { note = l; continue; }
     if (/^(tel|telefon|phone|mobil)/i.test(l) || /^[+\d][\d\s/()-]{6,}$/.test(l)) continue;

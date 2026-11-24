@@ -181,3 +181,22 @@ TRACKING #: 1Z 184 W5X 68 4076 0412 |`;
   assert.equal(r.service, '');
   assert.match(r.name, /Deutschland GmbH/);
 });
+
+test('UPS-Etikett: ß als B gelesen, verlesenes SHIP TO, Absender darüber', () => {
+  const text = `HERR MUSTERMANN 1 KG
+49530000000
+MUSTER MEDIA GMBH SHP#: 6il;
+KURT — MUSTER—STR. 9 SHP WT
+38315 HORNBURG DWT: 433
+ili TO:
+
+HOL’AB! GETRÄNKEMARKT GMBH
+
+BAVENSTEDTER STRABE 102
+
+31135 HILDESHEIM`;
+  const r = extractAddress(text);
+  assert.match(r.address, /^Bavenstedter Stra(ss|ß)e 102, 31135 Hildesheim$/);
+  assert.equal(r.name, 'Hol’Ab! Getränkemarkt GmbH');
+  assert.ok(!/to\b/i.test(r.name), r.name);
+});
