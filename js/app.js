@@ -37,6 +37,7 @@ const defaults = {
   hideInstallHint: false,
   book: {}, // Adressbuch: häufige Adressen
   tours: [], // gespeicherte Touren
+  tourDate: null, // Datum der aktuellen Tour (JJJJ-MM-TT)
   visits: [], // Aufenthalte an Adressen + Zustell-Ereignisse
   settings: {
     lang: 'de',
@@ -67,11 +68,17 @@ function load() {
   s.visits = pruneVisits(s.visits || []);
   s.book = s.book || {};
   if (!Object.keys(s.book).length) for (const st of s.stops) remember(s.book, st);
+  // Datum der aktuellen Tour (ältere Versionen: aus dem Erfassungszeitpunkt der Stopps)
+  if (!s.tourDate) {
+    const last = Math.max(0, ...s.stops.map((x) => x.createdAt || 0));
+    s.tourDate = last ? today(new Date(last)) : today();
+  }
+  if (!s.stops.length && s.tourDate < today()) s.tourDate = today();
   return s;
 }
 function save() {
   // Tour des Tages automatisch mitschreiben
-  state.tours = autosaveTour(state.tours || [], state.stops);
+  state.tours = autosaveTour(state.tours || [], state.stops, { date: state.tourDate || today() });
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -148,6 +155,12 @@ function render() {
   $('#emptyList').hidden = total > 0;
   $('#btnManual').hidden = total === 0;
   $('#installHint').hidden = !(IS_IOS && !IS_STANDALONE && !state.hideInstallHint);
+  // Datum der Tour; alte Tour mit offenen Stopps deutlich markieren
+  const old = state.tourDate < today() && pending.length > 0;
+  $('#tourDateLabel').textContent = t('tour_of', { d: fmtTourDate(state.tourDate) });
+  $('#tourOld').hidden = !old;
+  $('#tourBar').classList.toggle('old', old);
+  $('#btnNewTour').classList.toggle('primary', old);
 
   // Nächster Stopp
   const next = pending[0];
@@ -1184,6 +1197,56 @@ function fillNavSelect() {
 
 const dlgT = $('#dlgTours');
 
+/** "Heute, 24.11." / "Gestern, 23.11." / "Fr., 20.11." */
+function fmtTourDate(date) {
+  const d = new Date((date || today()) + 'T12:00:00');
+  const diff = Math.round((new Date(today() + 'T12:00:00') - d) / 86400000);
+  const dm = d.toLocaleDateString(getLang(), { day: '2-digit', month: '2-digit' });
+  const rel = { 0: t('today'), 1: t('yesterday'), '-1': t('tomorrow') }[diff];
+  return rel ? `${rel}, ${dm}` : d.toLocaleDateString(getLang(), { weekday: 'short', day: '2-digit', month: '2-digit' });
+}
+
+/* ---------------- Neue Tour ---------------- */
+
+const dlgNT = $('#dlgNewTour');
+const savedTourFor = (d) => d !== state.tourDate && (state.tours || []).find((x) => x.auto && x.date === d && x.stops?.length);
+
+function openNewTour() {
+  if (dlgT.open) dlgT.close();
+  $('#newTourDate').value = today();
+  updateNewTourInfo();
+  dlgNT.showModal();
+}
+function updateNewTourInfo() {
+  const d = $('#newTourDate').value || today();
+  const lines = [];
+  if (state.stops.length && d !== state.tourDate) lines.push(t('new_tour_keep', { n: state.stops.length, d: fmtTourDate(state.tourDate) }));
+  const ex = savedTourFor(d);
+  if (ex) lines.push(t('new_tour_exists', { n: ex.stops.length }));
+  $('#newTourInfo').textContent = lines.join(' ');
+}
+function startNewTour(scan) {
+  const d = $('#newTourDate').value || today();
+  if (d === state.tourDate && state.stops.length && !confirm(t('new_tour_same', { n: state.stops.length }))) return;
+  save(); // bisherige Tour unter ihrem Datum sichern
+  const ex = savedTourFor(d);
+  // schon gespeicherte Tour für dieses Datum fortsetzen (Status bleibt erhalten)
+  state.stops = ex ? ex.stops.map((s) => ({ ...s, id: uid(), status: s.status || 'pending', createdAt: Date.now() })) : [];
+  state.route = null;
+  state.tourDate = d;
+  save();
+  render();
+  dlgNT.close();
+  showView('list');
+  toast(t('new_tour_started', { d: fmtTourDate(d) }));
+  if (scan) openQuick();
+}
+for (const id of ['#btnNewTour', '#btnNewTour2']) $(id).addEventListener('click', openNewTour);
+$('#newTourDate').addEventListener('input', updateNewTourInfo);
+$('#btnNewTourOk').addEventListener('click', () => startNewTour(false));
+$('#btnNewTourScan').addEventListener('click', () => startNewTour(true));
+dlgNT.addEventListener('click', (e) => { if (e.target === dlgNT) dlgNT.close(); });
+
 function tourTitle(tr) {
   if (!tr.auto) return tr.name;
   const d = new Date(tr.date + 'T12:00:00');
@@ -1518,6 +1581,8 @@ $('#tourList').addEventListener('click', (e) => {
   const restored = restoreStops(tr);
   if (act === 'load') {
     if (state.stops.some(isOpen) && !confirm(t('tour_confirm_replace'))) return;
+    save(); // aktuelle Tour unter ihrem Datum sichern
+    if (state.tourDate < today()) state.tourDate = today();
     state.stops = restored;
   } else {
     const have = new Set(state.stops.map((s) => normKey(s.address)));
@@ -1641,6 +1706,7 @@ $('#btnClearAll').addEventListener('click', () => {
   if (!confirm(t('confirm_clear_all'))) return;
   state.stops = [];
   state.route = null;
+  state.tourDate = today();
   save();
   render();
   dlgS.close();

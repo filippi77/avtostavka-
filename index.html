@@ -46,6 +46,14 @@
         <button class="x-btn" id="btnHideHint" data-i18n-aria="close">✕</button>
       </div>
 
+      <div class="tour-bar" id="tourBar">
+        <div class="tour-bar-text">
+          <b id="tourDateLabel"></b>
+          <small id="tourOld" hidden data-i18n="tour_old">Alte Tour – für heute „Neue Tour“ tippen</small>
+        </div>
+        <button class="btn small" id="btnNewTour"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/></svg><span data-i18n="new_tour">Neue Tour</span></button>
+      </div>
+
       <div class="empty" id="emptyList">
         <div class="empty-icon">
           <svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>
@@ -291,12 +299,13 @@
         <h2 data-i18n="tours">Touren</h2>
         <button class="x-btn" value="cancel" data-i18n-aria="close">✕</button>
       </div>
+      <button type="button" class="btn primary" id="btnNewTour2"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/></svg><span data-i18n="new_tour">Neue Tour</span></button>
       <div class="form-group">
         <label class="field"><span data-i18n="tour_name">Name der Tour</span>
           <input id="tourName" type="text" autocapitalize="sentences">
         </label>
       </div>
-      <button type="button" class="btn primary" id="btnSaveTour" data-i18n="tour_save">Aktuelle Tour speichern</button>
+      <button type="button" class="btn" id="btnSaveTour" data-i18n="tour_save">Aktuelle Tour speichern</button>
       <div class="section-label" data-i18n="tours_saved">Gespeicherte Touren</div>
       <ul class="group tour-list" id="tourList"></ul>
       <div class="section-label hist-head"><span data-i18n="hist">Verlauf</span>
@@ -314,6 +323,27 @@
       </div>
       <p class="hint" data-i18n="backup_hint"></p>
       <input type="file" accept="application/json,.json" id="importFile" hidden>
+    </form>
+  </dialog>
+
+  <!-- Neue Tour -->
+  <dialog id="dlgNewTour" class="sheet">
+    <div class="grabber"></div>
+    <form method="dialog" class="sheet-body">
+      <div class="sheet-head">
+        <h2 data-i18n="new_tour">Neue Tour</h2>
+        <button class="x-btn" value="cancel" data-i18n-aria="close">✕</button>
+      </div>
+      <div class="form-group">
+        <label class="field"><span data-i18n="tour_date">Datum</span>
+          <input id="newTourDate" type="date" required>
+        </label>
+      </div>
+      <p class="hint" id="newTourInfo"></p>
+      <div class="sheet-foot new-tour-foot">
+        <button type="button" class="btn primary" id="btnNewTourScan" data-i18n="confirm_scan">Bestätigen &amp; scannen</button>
+        <button type="button" class="btn" id="btnNewTourOk" data-i18n="confirm">Bestätigen</button>
+      </div>
     </form>
   </dialog>
 
