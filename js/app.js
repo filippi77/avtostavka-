@@ -1851,7 +1851,9 @@ $('#btnSettings').addEventListener('click', () => {
   $('#setDwell').value = String(s.dwellSec || 30);
   dlgS.showModal();
 });
-$('#btnSaveSettings').addEventListener('click', () => {
+/** Einstellungen übernehmen – sofort bei jeder Änderung (auch wenn das Fenster mit ✕ oder Wischen geschlossen wird) */
+function applySettings() {
+  const wasMini = state.settings.miniWindow;
   Object.assign(state.settings, {
     lang: $('#setLang').value,
     ocr: $('#setOcr').value,
@@ -1867,12 +1869,16 @@ $('#btnSaveSettings').addEventListener('click', () => {
     trackVisits: $('#setTrack').checked,
     dwellSec: +$('#setDwell').value || 30,
   });
-  if (state.settings.miniWindow) state.overlayAsked = false; // beim nächsten Navigieren noch einmal nach der Erlaubnis fragen
+  if (state.settings.miniWindow && !wasMini) state.overlayAsked = false; // beim nächsten Navigieren noch einmal nach der Erlaubnis fragen
   save();
   startTracking();
   setLang(state.settings.lang);
   showView(currentView);
   render();
+}
+$('#dlgSettings').addEventListener('change', (e) => { if (e.target.closest('input, select')) applySettings(); });
+$('#btnSaveSettings').addEventListener('click', () => {
+  applySettings();
   toast(t('saved'));
 });
 $('#btnClearAll').addEventListener('click', () => {
