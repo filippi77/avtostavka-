@@ -376,11 +376,15 @@
       </button>
     </div>
     <div class="q-bottom">
+      <div class="seg q-seg" id="quickModeSeg" role="tablist">
+        <button type="button" data-mode="code" data-i18n="quick_mode_code">Code + Adresse</button>
+        <button type="button" data-mode="text" data-i18n="quick_mode_text">Nur Adresse</button>
+      </div>
       <div class="q-status" id="quickStatus"></div>
       <div class="q-last" id="quickLast"></div>
       <div class="q-queue" id="quickQueue"></div>
       <div class="q-btns">
-        <button type="button" class="btn" id="btnQuickPhoto">📷 <span data-i18n="quick_photo">Text lesen</span></button>
+        <button type="button" class="btn" id="btnQuickPhoto">📷 <span class="q-photo-code" data-i18n="quick_photo">Text lesen</span><span class="q-photo-text" data-i18n="quick_shoot">Adresse aufnehmen</span></button>
         <button type="button" class="btn primary" id="btnQuickFinish" data-i18n="quick_finish">Fertig</button>
       </div>
     </div>

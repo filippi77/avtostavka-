@@ -622,3 +622,14 @@ dialog.quick::backdrop { background: #000; }
 #btnNewTour2 svg { width: 20px; height: 20px; }
 .new-tour-foot { grid-template-columns: 1fr; }
 #newTourDate { min-height: 40px; }
+
+/* ---------- Schnellerfassung: Modus „Nur Adresse“ ---------- */
+.q-seg { display: grid; grid-template-columns: 1fr 1fr; background: rgba(255,255,255,.15); border-radius: 12px; padding: 3px; gap: 3px; }
+.q-seg button { border: 0; border-radius: 10px; min-height: 38px; background: transparent; color: #fff; font: inherit; font-size: 15px; font-weight: 700; }
+.q-seg button.active { background: var(--gold); color: #351c15; }
+.q-photo-text { display: none; }
+.quick.mode-text .q-photo-code { display: none; }
+.quick.mode-text .q-photo-text { display: inline; }
+.quick.mode-text #btnQuickPhoto { background: var(--gold); color: #351c15; font-size: 18px; font-weight: 800; }
+.quick.mode-text #btnQuickFinish { background: rgba(255,255,255,.15); color: #fff; }
+.quick.mode-text .q-frame { top: 40%; width: min(88vw, 420px); aspect-ratio: 16 / 10; border-radius: 14px; }

@@ -1392,6 +1392,7 @@ const renderSoon = () => { clearTimeout(renderTimer); renderTimer = setTimeout(r
 async function openQuick() {
   unlockAudio();
   quick = { scanner: null, lastKey: '', lastAt: 0, count: 0 };
+  setQuickMode(state.settings.quickMode || 'code');
   $('#quickCount').textContent = '0';
   $('#quickLast').textContent = '';
   $('#quickStatus').textContent = t('quick_starting');
@@ -1400,10 +1401,11 @@ async function openQuick() {
   if (!myPos) locate(); // für die Adresssuche in der Nähe
   const sc = new LiveScanner($('#quickVideo'), onQuickCode);
   quick.scanner = sc;
+  sc.codes = quickMode() === 'code';
   try {
     await sc.start();
     if (!quick) return sc.stop();
-    $('#quickStatus').textContent = t('quick_ready');
+    $('#quickStatus').textContent = t(quickMode() === 'code' ? 'quick_ready' : 'quick_text_hint');
   } catch (err) {
     console.error(err);
     $('#quickStatus').textContent = err?.message === 'ZXing' ? t('quick_lib_error') : t('quick_cam_error');
@@ -1487,10 +1489,37 @@ async function quickAdd(r, getSnapshot) {
   pumpQueues();
 }
 
-/** Foto-Taste in der Schnellerfassung: Etikett ohne lesbaren Code → nur Text erkennen */
+/**
+ * Zwei Arten der Schnellerfassung:
+ *  - 'code': MaxiCode/Strichcode live lesen (Sendungsnummer, Service), Adresse per Texterkennung im Hintergrund
+ *  - 'text': nur Adresse – auslösen per Taste oder Tippen aufs Bild, nur der Rahmen wird gelesen
+ */
+const quickMode = () => (state.settings.quickMode === 'text' ? 'text' : 'code');
+function setQuickMode(m) {
+  state.settings.quickMode = m;
+  save();
+  $('#dlgQuick').classList.toggle('mode-text', m === 'text');
+  for (const b of document.querySelectorAll('#quickModeSeg button')) b.classList.toggle('active', b.dataset.mode === m);
+  if (quick?.scanner) {
+    quick.scanner.codes = m === 'code';
+    if (m === 'text') quick.scanner.lastSymbol = null;
+  }
+  if (quick) $('#quickStatus').textContent = t(m === 'code' ? 'quick_ready' : 'quick_text_hint');
+}
+$('#quickModeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mode]');
+  if (b) setQuickMode(b.dataset.mode);
+});
+// Nur Adresse: Tippen aufs Bild löst aus
+$('#quickVideo').addEventListener('click', () => { if (quickMode() === 'text') quickPhoto(); });
+
+/** Foto-Taste: Etikett ohne lesbaren Code / Modus „Nur Adresse“ → nur Text erkennen */
 async function quickPhoto() {
   if (!quick?.scanner) return;
-  const blob = await quick.scanner.snapshot();
+  const now = Date.now();
+  if (now - (quick.lastShot || 0) < 600) return; // Doppeltipp
+  quick.lastShot = now;
+  const blob = await quick.scanner.snapshot(quickMode() === 'text' ? $('#dlgQuick .q-frame') : null);
   if (!blob) return;
   const stop = { id: uid(), address: '⏳', name: '', phone: '', note: '', lat: null, lon: null, precision: '', status: 'pending', service: '', express: false, tracking: '', createdAt: Date.now(), pending: 'ocr' };
   placeStop(stop);
@@ -1528,7 +1557,11 @@ async function ocrWorker() {
       const { text } = await recognize(job.blob, () => {}, state.settings.ocr);
       const r = extractAddress(text);
       // gleiches Paket schon vorhanden (Sendungsnummer erst jetzt erkannt)?
+      const k = r.address ? normKey(r.address) : '';
       if (r.tracking && !s.tracking && state.stops.some((x) => x !== s && x.tracking === r.tracking)) {
+        state.stops.splice(state.stops.indexOf(s), 1);
+      } else if (k && !s.tracking && !r.tracking && state.stops.some((x) => x !== s && Math.abs(x.createdAt - s.createdAt) < 5000 && normKey(x.address) === k)) {
+        // dasselbe Etikett zweimal kurz hintereinander aufgenommen
         state.stops.splice(state.stops.indexOf(s), 1);
       } else if (r.address) {
         s.address = r.address;
